@@ -12,7 +12,12 @@ from pathlib import Path
 import pytest
 
 from media_pipeline.__main__ import main
-from media_pipeline.captions import build_captions, compile_srt, load_alignment
+from media_pipeline.captions import (
+    DEFAULT_PAUSE_THRESHOLD,
+    build_captions,
+    compile_srt,
+    load_alignment,
+)
 
 FIXTURE = Path(__file__).resolve().parent / "fixtures" / "speech-smoke-001"
 ORIGINAL_TEXT = FIXTURE / "original.txt"
@@ -57,6 +62,21 @@ def test_real_captions_stay_within_alignment_bounds() -> None:
     assert captions[0].end == 4.88
     assert captions[1].start == 5.2
     assert captions[1].end == tokens[-1].end == 7.92
+
+
+def test_fixture_comma_pause_is_a_measurable_pause() -> None:
+    tokens = load_alignment(ALIGNMENT)
+    gap = tokens[17].start - tokens[16].end
+    assert gap == pytest.approx(0.32)
+    assert gap >= DEFAULT_PAUSE_THRESHOLD
+
+
+def test_comma_pause_splits_without_a_newline() -> None:
+    # Removing the source line break must not change the caption split: the
+    # 0.32s alignment gap after the comma is enough on its own.
+    text_without_newline = _fixture_text().replace("\n", "")
+    assert "\n" not in text_without_newline
+    assert compile_srt(text_without_newline, load_alignment(ALIGNMENT)) == EXPECTED_SRT
 
 
 def test_cli_writes_expected_srt(tmp_path: Path) -> None:

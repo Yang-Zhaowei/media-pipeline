@@ -15,6 +15,8 @@ from .captions import (
     DEFAULT_BREAK_AFTER,
     DEFAULT_MAX_CHARS,
     DEFAULT_MAX_DURATION,
+    DEFAULT_PAUSE_THRESHOLD,
+    DEFAULT_SOFT_BREAK_AFTER,
     AlignmentError,
     compile_srt,
     load_alignment,
@@ -37,6 +39,17 @@ def build_parser() -> argparse.ArgumentParser:
         "--break-after",
         default=DEFAULT_BREAK_AFTER,
         help="characters that always end a caption (default: %(default)r)",
+    )
+    parser.add_argument(
+        "--soft-break-after",
+        default=DEFAULT_SOFT_BREAK_AFTER,
+        help="clause punctuation used as a fallback breakpoint (default: %(default)r)",
+    )
+    parser.add_argument(
+        "--pause-threshold",
+        type=float,
+        default=DEFAULT_PAUSE_THRESHOLD,
+        help="alignment gap in seconds that ends a caption (default: %(default)s)",
     )
     parser.add_argument(
         "--max-chars",
@@ -80,8 +93,10 @@ def main(argv: list[str] | None = None) -> int:
             original_text,
             tokens,
             break_after=args.break_after,
+            soft_break_after=args.soft_break_after,
             max_chars=args.max_chars,
             max_duration=args.max_duration,
+            pause_threshold=args.pause_threshold,
         )
     except (AlignmentError, OSError) as exc:
         parser.error(str(exc))

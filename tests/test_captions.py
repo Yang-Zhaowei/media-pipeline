@@ -243,3 +243,176 @@ def test_render_srt_without_captions_is_empty() -> None:
 def test_compile_srt_composes_build_and_render() -> None:
     srt = compile_srt("你好。", _tokens(("你", 0.0, 0.5), ("好", 0.5, 1.0)))
     assert srt == "1\n00:00:00,000 --> 00:00:01,000\n你好。\n"
+
+
+# --- trailing closing punctuation ------------------------------------------
+
+
+def test_closing_quote_stays_with_the_sentence_it_closes() -> None:
+    captions = build_captions(
+        "他说：“你好。”再见。",
+        _tokens(
+            ("他", 0.0, 0.1),
+            ("说", 0.1, 0.2),
+            ("你", 0.2, 0.3),
+            ("好", 0.3, 0.4),
+            ("再", 0.4, 0.5),
+            ("见", 0.5, 0.6),
+        ),
+    )
+    assert [caption.text for caption in captions] == ["他说：“你好。”", "再见。"]
+
+
+def test_closing_bracket_stays_with_the_sentence_it_closes() -> None:
+    captions = build_captions(
+        "（第一句。）第二句。",
+        _tokens(
+            ("第", 0.0, 0.1),
+            ("一", 0.1, 0.2),
+            ("句", 0.2, 0.3),
+            ("第", 0.3, 0.4),
+            ("二", 0.4, 0.5),
+            ("句", 0.5, 0.6),
+        ),
+    )
+    assert [caption.text for caption in captions] == ["（第一句。）", "第二句。"]
+
+
+def test_repeated_sentence_marks_stay_together() -> None:
+    captions = build_captions(
+        "真的吗？！然后呢。",
+        _tokens(
+            ("真", 0.0, 0.1),
+            ("的", 0.1, 0.2),
+            ("吗", 0.2, 0.3),
+            ("然", 0.3, 0.4),
+            ("后", 0.4, 0.5),
+            ("呢", 0.5, 0.6),
+        ),
+    )
+    assert [caption.text for caption in captions] == ["真的吗？！", "然后呢。"]
+
+
+def test_closing_quote_before_newline_stays_attached() -> None:
+    captions = build_captions(
+        "他说：“你好。”\n再见。",
+        _tokens(
+            ("他", 0.0, 0.1),
+            ("说", 0.1, 0.2),
+            ("你", 0.2, 0.3),
+            ("好", 0.3, 0.4),
+            ("再", 0.4, 0.5),
+            ("见", 0.5, 0.6),
+        ),
+    )
+    assert [caption.text for caption in captions] == ["他说：“你好。”", "再见。"]
+
+
+def test_opening_quote_starts_the_next_caption() -> None:
+    captions = build_captions(
+        "他说。“你好”。",
+        _tokens(
+            ("他", 0.0, 0.1),
+            ("说", 0.1, 0.2),
+            ("你", 0.2, 0.3),
+            ("好", 0.3, 0.4),
+        ),
+    )
+    assert [caption.text for caption in captions] == ["他说。", "“你好”。"]
+
+
+# --- pause-aware breaks ----------------------------------------------------
+
+
+def test_pause_gap_splits_without_punctuation_or_newline() -> None:
+    captions = build_captions(
+        "abcd",
+        _tokens(("a", 0.0, 0.5), ("b", 0.5, 1.0), ("c", 1.4, 1.9), ("d", 1.9, 2.4)),
+    )
+    assert captions == [
+        Caption(start=0.0, end=1.0, text="ab"),
+        Caption(start=1.4, end=2.4, text="cd"),
+    ]
+
+
+def test_pause_threshold_is_configurable() -> None:
+    tokens = _tokens(("a", 0.0, 0.5), ("b", 0.5, 1.0), ("c", 1.4, 1.9), ("d", 1.9, 2.4))
+    captions = build_captions("abcd", tokens, pause_threshold=0.5)
+    assert captions == [Caption(start=0.0, end=2.4, text="abcd")]
+
+
+def test_invalid_pause_threshold_is_rejected() -> None:
+    with pytest.raises(ValueError, match="pause_threshold"):
+        build_captions("a", [], pause_threshold=-0.1)
+
+
+# --- natural candidate breakpoints when a budget is exceeded ----------------
+
+
+def test_budget_prefers_recent_soft_breakpoint() -> None:
+    captions = build_captions(
+        "一二三，四五六七八",
+        _tokens(
+            ("一", 0.0, 0.1),
+            ("二", 0.1, 0.2),
+            ("三", 0.2, 0.3),
+            ("四", 0.3, 0.4),
+            ("五", 0.4, 0.5),
+            ("六", 0.5, 0.6),
+            ("七", 0.6, 0.7),
+            ("八", 0.7, 0.8),
+        ),
+        max_chars=6,
+    )
+    assert [caption.text for caption in captions] == ["一二三，", "四五六七八"]
+
+
+def test_budget_prefers_recent_pause_candidate() -> None:
+    captions = build_captions(
+        "abcde",
+        _tokens(
+            ("a", 0.0, 0.4),
+            ("b", 0.4, 0.8),
+            ("c", 0.9, 1.3),
+            ("d", 1.3, 1.7),
+            ("e", 1.7, 2.1),
+        ),
+        max_chars=3,
+    )
+    assert [caption.text for caption in captions] == ["ab", "cde"]
+
+
+def test_duration_budget_prefers_candidate_breakpoint() -> None:
+    captions = build_captions(
+        "ab，cde",
+        _tokens(
+            ("a", 0.0, 0.5),
+            ("b", 0.5, 1.0),
+            ("c", 1.0, 1.5),
+            ("d", 1.5, 2.0),
+            ("e", 2.0, 2.5),
+        ),
+        max_duration=1.6,
+    )
+    assert captions == [
+        Caption(start=0.0, end=1.0, text="ab，"),
+        Caption(start=1.0, end=2.5, text="cde"),
+    ]
+
+
+def test_budget_hard_cuts_when_no_candidate_exists() -> None:
+    captions = build_captions(
+        "一二三四五六七八",
+        _tokens(
+            ("一", 0.0, 0.1),
+            ("二", 0.1, 0.2),
+            ("三", 0.2, 0.3),
+            ("四", 0.3, 0.4),
+            ("五", 0.4, 0.5),
+            ("六", 0.5, 0.6),
+            ("七", 0.6, 0.7),
+            ("八", 0.7, 0.8),
+        ),
+        max_chars=6,
+    )
+    assert [caption.text for caption in captions] == ["一二三四五六", "七八"]
