@@ -8,20 +8,18 @@ WAV round-trip contract the Audio Postprocess stage consumes.
 
 from __future__ import annotations
 
-import importlib.util
 import sys
 from pathlib import Path
 
 import pytest
 
 from media_pipeline import (
-    DEFAULT_INSTRUCT,
     CustomVoiceError,
     CustomVoiceRequest,
+    TTSRuntimeError,
     TTSArtifact,
 )
 from media_pipeline.tts import (
-    flatten_to_mono,
     validate_request,
     waveform_to_mono_pcm16,
 )
@@ -34,10 +32,6 @@ _PCM16_MAX = 32_767
 # --- portable boundary: importing the package must not load the runtime -----
 
 
-def _is_imported(name: str) -> bool:
-    return importlib.util.find_spec(name) is not None
-
-
 def test_importing_media_pipeline_does_not_pull_torch_or_qwen_or_soundfile() -> None:
     # A fresh interpreter already importing media_pipeline must not have pulled
     # any heavy runtime dependency. The runtime package stays un-imported too.
@@ -45,14 +39,6 @@ def test_importing_media_pipeline_does_not_pull_torch_or_qwen_or_soundfile() -> 
     assert "qwen_tts" not in sys.modules
     assert "soundfile" not in sys.modules
     assert "media_pipeline.runtimes" not in sys.modules
-
-
-def test_runtime_import_is_available_only_if_installed() -> None:
-    # This documents the environment, not a requirement: the adapter module is
-    # import-safe, but torch/qwen_tts are optional (present only on ai-core).
-    assert (_is_imported("torch") and _is_imported("qwen_tts")) or (
-        not _is_imported("torch") and not _is_imported("qwen_tts")
-    )
 
 
 # --- CustomVoiceRequest semantics ------------------------------------------
@@ -73,7 +59,7 @@ def test_request_preserves_text_language_speaker_instruct() -> None:
 
 def test_request_instruct_defaults_to_empty_string() -> None:
     request = CustomVoiceRequest(text="hello", language="English", speaker="Ann")
-    assert request.instruct == DEFAULT_INSTRUCT == ""
+    assert request.instruct == ""
 
 
 def test_request_is_frozen() -> None:
@@ -129,12 +115,16 @@ def test_pcm16_conversion_clips_positive_and_negative_peaks() -> None:
     assert waveform_to_mono_pcm16([-2.5]) == [_PCM16_MIN]
 
 
-def test_pcm16_conversion_nonfinite_becomes_silence() -> None:
+def test_pcm16_conversion_nonfinite_raises() -> None:
     import math
 
-    assert waveform_to_mono_pcm16([math.nan]) == [0]
-    assert waveform_to_mono_pcm16([math.inf]) == [0]
-    assert waveform_to_mono_pcm16([-math.inf]) == [0]
+    # NaN and +/-Inf must fail clearly, never silently become silence.
+    with pytest.raises(TTSRuntimeError):
+        waveform_to_mono_pcm16([math.nan])
+    with pytest.raises(TTSRuntimeError):
+        waveform_to_mono_pcm16([math.inf])
+    with pytest.raises(TTSRuntimeError):
+        waveform_to_mono_pcm16([-math.inf])
 
 
 def test_pcm16_conversion_stays_in_range_for_many_values() -> None:
@@ -143,20 +133,12 @@ def test_pcm16_conversion_stays_in_range_for_many_values() -> None:
     assert all(_PCM16_MIN <= sample <= _PCM16_MAX for sample in out)
 
 
-def test_flatten_to_mono_flat_sequence_is_already_mono() -> None:
-    assert flatten_to_mono([0.1, 0.2, 0.3]) == [0.1, 0.2, 0.3]
-
-
-def test_flatten_to_mono_mixes_channels_by_averaging() -> None:
-    # Two channels of 4 samples each -> mono by averaging per sample.
-    mixed = flatten_to_mono([[0.0, 0.2, 0.4, 0.6], [1.0, 1.2, 1.4, 1.6]])
-    assert mixed == pytest.approx([0.5, 0.7, 0.9, 1.1])
-
-
-def test_flatten_to_mono_truncates_to_shortest_channel() -> None:
-    assert flatten_to_mono([[0.0, 0.2, 0.4], [1.0, 1.2, 1.4, 1.6]]) == pytest.approx(
-        [0.5, 0.7, 0.9]
-    )
+def test_pcm16_rejects_nested_channel_shaped_input() -> None:
+    # v0 expects one flat mono waveform; nested/channel-shaped input is rejected.
+    with pytest.raises(TTSRuntimeError):
+        waveform_to_mono_pcm16([[0.0, 0.2], [0.4, 0.6]])
+    with pytest.raises(TTSRuntimeError):
+        waveform_to_mono_pcm16([0.1, [0.2], 0.3])
 
 
 def test_pcm16_treats_integers_as_normalized_floats() -> None:

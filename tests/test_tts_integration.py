@@ -15,27 +15,27 @@ deliberately separated from the ordinary CPU suite.
 
 from __future__ import annotations
 
-import importlib.util
 import os
 from pathlib import Path
 
 import pytest
 
 from media_pipeline import CustomVoiceRequest
-from media_pipeline.tts import read_wav
+from media_pipeline.postprocess import read_wav
 
 FIXTURE = Path(__file__).resolve().parent / "fixtures" / "speech-smoke-001"
 ORIGINAL_TEXT = FIXTURE / "original.txt"
 
-_HAS_TORCH = importlib.util.find_spec("torch") is not None
-_HAS_QWEN_TTS = importlib.util.find_spec("qwen_tts") is not None
 _MODEL_PATH = os.environ.get("MEDIA_PIPELINE_TTS_MODEL")
 
+# Absence of MEDIA_PIPELINE_TTS_MODEL means integration was not requested: skip.
+# When it is set, integration is explicitly requested, so missing torch/qwen_tts
+# or any model-load / CUDA / synthesis failure must FAIL, not skip.
 skip_integration = pytest.mark.skipif(
-    not (_HAS_TORCH and _HAS_QWEN_TTS and _MODEL_PATH),
+    not _MODEL_PATH,
     reason=(
-        "Qwen3-TTS CustomVoice GPU integration requires torch, qwen_tts, and "
-        "MEDIA_PIPELINE_TTS_MODEL (ai-core integration host)"
+        "MEDIA_PIPELINE_TTS_MODEL is not set: GPU integration was not requested. "
+        "When set, any torch/qwen_tts/model/synthesis failure fails the test."
     ),
 )
 

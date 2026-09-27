@@ -21,16 +21,13 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from ..postprocess import read_wav, write_wav
 from ..tts import (
-    CustomVoiceError,
     CustomVoiceRequest,
     TTSRuntimeError,
     TTSArtifact,
-    flatten_to_mono,
     validate_request,
     waveform_to_mono_pcm16,
-    read_wav,
-    write_wav,
 )
 
 __all__ = ["Qwen3CustomVoiceTTS"]
@@ -60,13 +57,19 @@ class Qwen3CustomVoiceTTS:
                 f"failed to load Qwen3-TTS CustomVoice model {model_path}: {exc}"
             ) from exc
 
-    def get_supported_speakers(self) -> list[str]:
-        """Return the speakers the loaded model reports as supported."""
+    def get_supported_speakers(self) -> list[str] | None:
+        """Return the speakers the loaded model reports as supported.
+
+        The upstream API may return ``None``; that is reflected in the type.
+        """
 
         return self._model.get_supported_speakers()
 
-    def get_supported_languages(self) -> list[str]:
-        """Return the languages the loaded model reports as supported."""
+    def get_supported_languages(self) -> list[str] | None:
+        """Return the languages the loaded model reports as supported.
+
+        The upstream API may return ``None``; that is reflected in the type.
+        """
 
         return self._model.get_supported_languages()
 
@@ -77,8 +80,8 @@ class Qwen3CustomVoiceTTS:
 
         Mirrors the verified smoke test: ``generate_custom_voice`` is called
         with the request's ``text`` / ``language`` / ``speaker`` / ``instruct``,
-        the first returned waveform is converted to mono PCM16 deterministically,
-        written through :func:`media_pipeline.postprocess.write_wav`, and read
+        the first returned waveform is validated and converted to mono PCM16
+        deterministically, written as uncompressed mono 16-bit PCM WAV, and read
         back so the reported ``sample_rate``/``frames`` are authoritative.
         """
 
@@ -88,21 +91,30 @@ class Qwen3CustomVoiceTTS:
 
         model = self._model
         try:
-            torch.cuda.synchronize()
             wavs, sample_rate = model.generate_custom_voice(
                 text=request.text,
                 language=request.language,
                 speaker=request.speaker,
                 instruct=request.instruct,
             )
-            torch.cuda.synchronize()
         except Exception as exc:  # pragma: no cover - runtime specific
             raise TTSRuntimeError(
                 f"failed to synthesize utterance: {exc}"
             ) from exc
 
-        # A request is one utterance; take the first returned waveform.
-        samples = waveform_to_mono_pcm16(flatten_to_mono(wavs[0]))
+        # Validate the model/runtime output before writing anything.
+        if not wavs:
+            raise TTSRuntimeError("model returned no waveform")
+        if not isinstance(sample_rate, int) or sample_rate <= 0:
+            raise TTSRuntimeError(
+                f"model returned an invalid sample rate: {sample_rate!r}"
+            )
+
+        wave = wavs[0]
+        if not wave:
+            raise TTSRuntimeError("model returned an empty waveform")
+
+        samples = waveform_to_mono_pcm16(wave)
         write_wav(output_wav_path, samples, sample_rate)
 
         # Read back so the artifact's frame rate and frame count are authoritative.

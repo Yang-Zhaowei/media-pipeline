@@ -46,7 +46,6 @@ from .postprocess import (
     write_wav,
 )
 from .tts import (
-    DEFAULT_INSTRUCT,
     CustomVoiceError,
     CustomVoiceRequest,
     TTSRuntimeError,
@@ -69,7 +68,6 @@ __all__ = [
     "DEFAULT_BREAK_AFTER",
     "DEFAULT_MAX_CHARS",
     "DEFAULT_MAX_DURATION",
-    "DEFAULT_INSTRUCT",
     "DEFAULT_FADE_IN",
     "DEFAULT_FADE_OUT",
     "DEFAULT_POST_PADDING",

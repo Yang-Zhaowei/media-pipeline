@@ -4,8 +4,8 @@ This module holds the *portable* side of the Speech Pipeline's TTS stage:
 
 - the request/output contracts,
 - request validation,
-- a deterministic waveform-to-mono-16-bit-PCM conversion,
-- WAV I/O through the existing :mod:`media_pipeline.postprocess` helpers.
+- a flat-mono waveform-to-16-bit-PCM conversion,
+- WAV I/O helpers (owned by :mod:`media_pipeline.postprocess`).
 
 It is pure Python. It neither imports ``torch``, ``qwen_tts``, ``soundfile``,
 nor any CUDA binding at import time or at use time. The model/runtime adapter
@@ -15,8 +15,9 @@ Scope contract (v0):
 
 - One :class:`CustomVoiceRequest` is one already-segmented utterance. This
   module does not split sentences; the caller passes a single utterance.
-- The output WAV is mono, uncompressed, 16-bit PCM -- the exact format the
-  Audio Postprocess stage consumes.
+- The TTS engine returns a single flat mono waveform; the output WAV is mono,
+  uncompressed, 16-bit PCM -- the exact format the Audio Postprocess stage
+  consumes.
 - No model, host, or output path is hard-coded here.
 """
 
@@ -27,22 +28,14 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Sequence
 
-from .postprocess import read_wav, write_wav
-
 __all__ = [
-    "DEFAULT_INSTRUCT",
     "CustomVoiceError",
     "CustomVoiceRequest",
     "TTSRuntimeError",
     "TTSArtifact",
-    "flatten_to_mono",
     "validate_request",
     "waveform_to_mono_pcm16",
 ]
-
-#: The only product default for the free-form instruction. The verified Chinese
-#: narration instruction is integration-test input, not a default here.
-DEFAULT_INSTRUCT = ""
 
 
 class CustomVoiceError(ValueError):
@@ -50,9 +43,10 @@ class CustomVoiceError(ValueError):
 
 
 class TTSRuntimeError(RuntimeError):
-    """The model/runtime failed to load or to synthesize a request.
+    """Invalid model/runtime input or output, or the runtime failed.
 
-    Raised by the runtime adapter only; the portable side never raises this.
+    Raised by the portable converters for malformed waveform output and by the
+    runtime adapter for model/runtime failures.
     """
 
 
@@ -62,13 +56,14 @@ class CustomVoiceRequest:
 
     ``text`` is the full utterance (no sentence splitting by this module).
     ``language`` and ``speaker`` select the voice; ``instruct`` is optional
-    free-form direction that defaults to :data:`DEFAULT_INSTRUCT` (``""``).
+    free-form direction that defaults to the empty string. The verified Chinese
+    narration instruction is integration-test input, not a product default.
     """
 
     text: str
     language: str
     speaker: str
-    instruct: str = DEFAULT_INSTRUCT
+    instruct: str = ""
 
 
 @dataclass(frozen=True)
@@ -94,85 +89,11 @@ _SIGNED_MIN = -32_768
 _SIGNED_MAX = 32_767
 
 
-def _is_scalar(value: object) -> bool:
-    """True for a single sample (scalar), False for a channel (sequence).
-
-    Uses ``__len__`` rather than type checks so it works for plain Python
-    sequences and for NumPy/torch array-likes without depending on either.
-    """
-
-    return not hasattr(value, "__len__")
-
-
-def flatten_to_mono(channel_samples: Sequence[object]) -> list[float]:
-    """Mix any returned waveform to a single mono float channel.
-
-    - A flat sequence of scalars is already mono and is returned as floats.
-    - A sequence of channels (e.g. a 2-D array) is mixed to mono by averaging
-      the channels sample-by-sample, truncated to the shortest channel.
-
-    This never imports NumPy or torch; it only relies on iteration and
-    indexing.
-    """
-
-    try:
-        samples = list(channel_samples)
-    except TypeError:  # not iterable (a lone scalar)
-        return [float(channel_samples)]
-
-    if not samples:
-        return []
-
-    if _is_scalar(samples[0]):
-        return [float(value) for value in samples]
-
-    n_channels = len(samples)
-    length = min(len(channel) for channel in samples)
-    mixed: list[float] = []
-    for index in range(length):
-        total = 0.0
-        for channel in samples:
-            total += float(channel[index])
-        mixed.append(total / n_channels)
-    return mixed
-
-
-def waveform_to_mono_pcm16(channel_samples: Sequence[object]) -> list[int]:
-    """Convert a returned waveform to deterministic mono 16-bit PCM samples.
-
-    Steps, all pure and deterministic:
-
-    1. Mix to mono with :func:`flatten_to_mono`.
-    2. Map each float sample (assumed normalized to ``[-1.0, 1.0]``) to int16
-       with half-up rounding: ``q = floor(f * 32768 + 0.5)``.
-    3. Clamp non-finite floats (``nan``/``inf``) to ``0`` (silence) before
-       clamping into ``[_SIGNED_MIN, _SIGNED_MAX]``.
-
-    Clipping is explicit and bounded; no sample ever exceeds int16 range.
-    """
-
-    mono = flatten_to_mono(channel_samples)
-    out: list[int] = []
-    for value in mono:
-        if isinstance(value, bool) or not isinstance(value, (int, float)):
-            value = float(value)
-        f = float(value)
-        if math.isnan(f) or math.isinf(f):
-            f = 0.0
-        q = int(math.floor(f * 32_768 + 0.5))
-        if q > _SIGNED_MAX:
-            q = _SIGNED_MAX
-        elif q < _SIGNED_MIN:
-            q = _SIGNED_MIN
-        out.append(q)
-    return out
-
-
 def validate_request(request: CustomVoiceRequest) -> None:
     """Validate a request before it reaches the runtime.
 
     ``text``, ``language``, and ``speaker`` must be non-empty. ``instruct`` may
-    be empty (its default). Raises :class:`CustomVoiceError` otherwise.
+    be empty. Raises :class:`CustomVoiceError` otherwise.
     """
 
     if not isinstance(request.text, str) or not request.text.strip():
@@ -189,12 +110,39 @@ def validate_request(request: CustomVoiceRequest) -> None:
         )
 
 
-def _read_artifact(wav_path: str | Path) -> TTSArtifact:
-    """Read back a freshly written WAV into a :class:`TTSArtifact`."""
+def waveform_to_mono_pcm16(samples: Sequence[object]) -> list[int]:
+    """Convert a flat, finite mono waveform to deterministic int16 PCM.
 
-    samples, frame_rate, frames = read_wav(wav_path)
-    return TTSArtifact(
-        wav_path=Path(wav_path),
-        sample_rate=frame_rate,
-        frames=frames,
-    )
+    v0 expects a single flat mono waveform (as returned by ``wavs[0]``). The
+    contract enforced here is flat + finite + mono:
+
+    - nested or channel-shaped input (any element that is itself a sequence) is
+      rejected;
+    - finite values are mapped to int16 with half-up rounding,
+      ``q = floor(f * 32768 + 0.5)``, then clamped into the int16 range;
+    - non-finite values (NaN, +/-Inf) raise :class:`TTSRuntimeError` rather than
+      silently becoming silence.
+    """
+
+    flat = list(samples)
+    if not flat:
+        raise TTSRuntimeError("waveform has no samples")
+
+    out: list[int] = []
+    for value in flat:
+        if hasattr(value, "__len__"):
+            raise TTSRuntimeError(
+                "expected a flat mono waveform, got nested/channel-shaped input"
+            )
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            raise TTSRuntimeError(f"waveform value is not a number: {value!r}")
+        f = float(value)
+        if math.isnan(f) or math.isinf(f):
+            raise TTSRuntimeError(f"waveform contains a non-finite value: {f!r}")
+        q = int(math.floor(f * 32_768 + 0.5))
+        if q > _SIGNED_MAX:
+            q = _SIGNED_MAX
+        elif q < _SIGNED_MIN:
+            q = _SIGNED_MIN
+        out.append(q)
+    return out
