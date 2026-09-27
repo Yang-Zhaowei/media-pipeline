@@ -1,8 +1,14 @@
 """Media pipeline: deterministic, portable processing components.
 
 The speech pipeline is ``text -> TTS -> forced alignment -> audio postprocess ->
-caption compiler -> WAV + SRT``. It provides the caption compiler and the audio
-postprocess stage, both pure logic that run without CUDA.
+caption compiler -> WAV + SRT``. It provides the portable caption compiler, the
+audio postprocess stage, and the portable TTS contracts (request/output types,
+validation, PCM16 conversion). All of these are pure logic that run without
+CUDA.
+
+The GPU/model runtime adapters live under :mod:`media_pipeline.runtimes` and are
+intentionally **not** exported here: importing this package never pulls in
+``torch``, ``qwen_tts``, or ``soundfile``.
 """
 
 from .captions import (
@@ -39,6 +45,15 @@ from .postprocess import (
     trim_audio,
     write_wav,
 )
+from .tts import (
+    DEFAULT_INSTRUCT,
+    CustomVoiceError,
+    CustomVoiceRequest,
+    TTSRuntimeError,
+    TTSArtifact,
+    validate_request,
+    waveform_to_mono_pcm16,
+)
 
 __all__ = [
     "AlignedToken",
@@ -46,10 +61,15 @@ __all__ = [
     "AlignmentMismatchError",
     "Caption",
     "CaptionError",
+    "CustomVoiceError",
+    "CustomVoiceRequest",
     "AudioPostprocessError",
+    "TTSRuntimeError",
+    "TTSArtifact",
     "DEFAULT_BREAK_AFTER",
     "DEFAULT_MAX_CHARS",
     "DEFAULT_MAX_DURATION",
+    "DEFAULT_INSTRUCT",
     "DEFAULT_FADE_IN",
     "DEFAULT_FADE_OUT",
     "DEFAULT_POST_PADDING",
@@ -70,6 +90,8 @@ __all__ = [
     "trim_and_fade",
     "trim_alignment",
     "trim_audio",
+    "validate_request",
+    "waveform_to_mono_pcm16",
     "write_wav",
 ]
 
