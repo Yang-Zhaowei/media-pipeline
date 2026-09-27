@@ -40,7 +40,7 @@ duration:    6.88 s
 
 Manual listening check passed.
 
-### ASR / Forced Alignment
+### Forced Alignment
 
 Environment:
 
@@ -73,7 +73,7 @@ Vision:
 
 ## Current limitation
 
-The TTS and ASR/alignment integrations currently depend on separate Python environments.
+The TTS and forced-alignment integrations currently depend on separate Python environments.
 
 Pure processing code and unit tests must not depend on these host-specific environments.
 

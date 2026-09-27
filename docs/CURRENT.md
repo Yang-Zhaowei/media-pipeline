@@ -79,8 +79,12 @@ per request; long-text splitting and orchestration remain outside this module.
 
 ## Next
 
-Implement Production Alignment module v0 by promoting the already verified Qwen3 ForcedAligner experiment into portable project code while keeping GPU/runtime integration separate from pure processing.
+Implement Production Alignment module v0 by promoting the already verified
+Qwen3 ForcedAligner experiment into portable project code while keeping
+GPU/runtime integration separate from pure processing.
+
 The intended boundary should mirror Production TTS v0:
+
 ```text
 portable alignment contracts / validation
         ↓
@@ -89,7 +93,19 @@ Qwen ForcedAligner runtime adapter
 real ai-core integration
 ```
 
-## Pending after current task
+After Production Alignment v0 is complete, validate the production stages
+together end to end:
+
+```text
+→ TTS
+→ forced alignment
+→ audio post-processing
+→ caption compilation
+→ WAV + SRT
+```
+Successful end-to-end validation closes the Speech Pipeline v0 milestone.
+
+## Later directions
 - HTTP API
 - MCP
 - ASR workflow
