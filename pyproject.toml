@@ -1,0 +1,25 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "media-pipeline"
+version = "0.0.0"
+description = "Local-first AI-assisted media processing pipeline"
+readme = "docs/README.md"
+requires-python = ">=3.10"
+dependencies = []
+
+[project.optional-dependencies]
+dev = ["pytest>=8"]
+
+[dependency-groups]
+dev = ["pytest>=8"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/media_pipeline"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+addopts = "-q"
