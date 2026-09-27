@@ -38,7 +38,7 @@ last speech:  6.71 s
 ### Production TTS v0
 Merged via PR #3.
 Implemented:
-- portable CustomVoiceRequest and TTSArtifact contracts
+- portable `CustomVoiceRequest` and `TTSArtifact` contracts
 - deterministic flat-mono float waveform → PCM16 conversion
 - strict malformed / non-finite waveform validation
 - Qwen3-TTS CustomVoice GPU runtime adapter
@@ -47,8 +47,8 @@ Implemented:
 - generated WAV output directly compatible with Audio Postprocess
 - CPU unit tests and separately gated GPU integration tests
 
-Validation:
-```
+PR #3 validation evidence:
+```text
 PC_Client:
 123 passed, 2 skipped
 
@@ -61,7 +61,7 @@ NVIDIA GeForce RTX 4070
 ```
 
 Manual production artifact:
-```
+```text
 sample rate: 24000 Hz
 frames:      165120
 duration:    6.88 s
@@ -69,16 +69,19 @@ duration:    6.88 s
 
 The generated Chinese narration was manually listened to and judged acceptable.
 
+Production TTS v0 intentionally operates on one already-segmented utterance
+per request; long-text splitting and orchestration remain outside this module.
+
 ## Verified on ai-core
 - Production Qwen3-TTS CustomVoice integration passes against the real model.
 - Qwen3 ForcedAligner produces character-level Chinese timestamps.
-- Real speech/alignment regression outputs are stored in tests/fixtures/speech-smoke-001/.
+- Real speech/alignment regression outputs are stored in `tests/fixtures/speech-smoke-001/`.
 
 ## Next
 
 Implement Production Alignment module v0 by promoting the already verified Qwen3 ForcedAligner experiment into portable project code while keeping GPU/runtime integration separate from pure processing.
 The intended boundary should mirror Production TTS v0:
-```
+```text
 portable alignment contracts / validation
         ↓
 Qwen ForcedAligner runtime adapter
@@ -86,8 +89,7 @@ Qwen ForcedAligner runtime adapter
 real ai-core integration
 ```
 
-## Not yet started
-- production alignment module
+## Pending after current task
 - HTTP API
 - MCP
 - ASR workflow
