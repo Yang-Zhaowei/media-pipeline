@@ -74,6 +74,39 @@ def test_compute_trim_quantizes_back_with_ceil() -> None:
     assert plan.end == pytest.approx(42 / 8)
 
 
+# --- fractional positions pin floor/ceil (not round) -----------------------
+
+
+def test_compute_trim_front_flows_fractional_position() -> None:
+    # requested 0.8 s * 8 = 6.4 frames: floor must drop to 6, not ceil to 7.
+    plan = compute_trim(_tokens(("a", 1.0, 5.0)), frame_rate=8, frames=64, pre_padding=0.2)
+    assert plan.start_frame == 6
+    assert plan.start_frame != 7
+
+
+def test_compute_trim_front_floor_distinguished_from_round() -> None:
+    # requested 0.825 s * 8 = 6.6 frames: floor gives 6, round would give 7.
+    plan = compute_trim(
+        _tokens(("a", 1.0, 5.0)), frame_rate=8, frames=64, pre_padding=0.175
+    )
+    assert plan.start_frame == 6
+
+
+def test_compute_trim_back_ceils_fractional_position() -> None:
+    # requested 5.1 s * 8 = 40.8 frames: ceil must rise to 41, not floor to 40.
+    plan = compute_trim(_tokens(("a", 1.0, 5.0)), frame_rate=8, frames=64, post_padding=0.1)
+    assert plan.end_frame == 41
+    assert plan.end_frame != 40
+
+
+def test_compute_trim_back_ceils_distinguished_from_round() -> None:
+    # requested 5.05 s * 8 = 40.4 frames: ceil gives 41, round would give 40.
+    plan = compute_trim(
+        _tokens(("a", 1.0, 5.0)), frame_rate=8, frames=64, post_padding=0.05
+    )
+    assert plan.end_frame == 41
+
+
 # --- defaults on the fixture numbers ---------------------------------------
 
 

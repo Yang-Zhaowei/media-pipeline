@@ -38,7 +38,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Sequence
 
-from .captions import AlignedToken, load_alignment, parse_alignment
+from .captions import AlignedToken, parse_alignment
 
 __all__ = [
     "DEFAULT_FADE_IN",
@@ -53,6 +53,7 @@ __all__ = [
     "sample_index",
     "trim_and_fade",
     "trim_alignment",
+    "trim_audio",
     "write_wav",
 ]
 
@@ -128,21 +129,6 @@ class TrimPlan:
         """Number of frames retained after trimming."""
 
         return self.end_frame - self.start_frame
-
-
-def _as_seconds(value: object, position: int, field: str) -> float:
-    # Reused shape check from the caption stage so malformed alignment raises
-    # the same family of errors before we ever touch the audio.
-    if isinstance(value, bool) or not isinstance(value, (int, float)):
-        raise AudioPostprocessError(
-            f"alignment item {position} field {field!r} must be a number, got {value!r}"
-        )
-    seconds = float(value)
-    if not math.isfinite(seconds):
-        raise AudioPostprocessError(
-            f"alignment item {position} field {field!r} must be finite, got {value!r}"
-        )
-    return seconds
 
 
 def compute_trim(
@@ -295,27 +281,6 @@ def trim_and_fade(
     return output
 
 
-def _read_pcm_codec(path: str | Path) -> int:
-    """Return the WAVE_FORMAT tag (1 == uncompressed PCM) from the ``fmt "`` chunk.
-
-    Scanning the chunk directly keeps the check correct regardless of chunk
-    ordering and independent of the version-specific behaviour of the stdlib
-    ``wave`` compression-name helpers.
-    """
-
-    try:
-        with open(path, "rb") as handle:
-            header = handle.read(4096)
-    except OSError as exc:
-        raise AudioPostprocessError(f"cannot read WAV {path}: {exc}") from exc
-
-    index = header.find(b"fmt ")
-    if index < 0:
-        raise AudioPostprocessError(f"{path} has no WAVE 'fmt ' chunk")
-    codec = struct.unpack("<H", header[index + 8 : index + 10])[0]
-    return codec
-
-
 def read_wav(path: str | Path) -> tuple[list[int], int, int]:
     """Read an uncompressed mono 16-bit PCM WAV.
 
@@ -324,6 +289,9 @@ def read_wav(path: str | Path) -> tuple[list[int], int, int]:
     compression code.
     """
 
+    # The stdlib ``wave`` parser handles RIFF/chunk ordering and already fails
+    # on formats it cannot decode. We keep the explicit mono + 16-bit restriction
+    # for v0; any other channel count, sample width, or compression is rejected.
     try:
         with wave.open(str(path), "rb") as handle:
             nchannels = handle.getnchannels()
@@ -334,11 +302,10 @@ def read_wav(path: str | Path) -> tuple[list[int], int, int]:
     except (OSError, wave.Error) as exc:
         raise AudioPostprocessError(f"cannot read WAV {path}: {exc}") from exc
 
-    codec = _read_pcm_codec(path)
-    if nchannels != 1 or sampwidth != 2 or codec != 1:
+    if nchannels != 1 or sampwidth != 2:
         raise AudioPostprocessError(
             "only uncompressed mono 16-bit PCM WAV is supported; "
-            f"got {nchannels} channel(s), {sampwidth * 8}-bit, format tag={codec}"
+            f"got {nchannels} channel(s), {sampwidth * 8}-bit"
         )
 
     samples = list(struct.unpack(f"<{nframes}h", raw))
@@ -367,15 +334,14 @@ def postprocess_speech(
     fade_in: float = DEFAULT_FADE_IN,
     fade_out: float = DEFAULT_FADE_OUT,
     encoding: str = "utf-8",
-    trim: TrimPlan | None = None,
 ) -> TrimPlan:
     """Run the full v0 postprocess end to end.
 
-    Reads ``raw_wav_path`` and ``alignment_path``, computes the trim window,
-    writes the cleaned WAV to ``output_wav_path`` and the adjusted alignment
-    (same ``{"text", "start", "end"}`` shape, timestamps shifted and their
-    precision preserved) to ``output_alignment_path``. Returns the
-    :class:`TrimPlan` used. Pass ``trim`` to reuse a plan computed elsewhere.
+    Reads ``raw_wav_path`` and ``alignment_path``, computes the trim window from
+    the current WAV and alignment, writes the cleaned WAV to ``output_wav_path``
+    and the adjusted alignment (same ``{"text", "start", "end"}`` shape,
+    timestamps shifted and their precision preserved) to ``output_alignment_path``.
+    Returns the :class:`TrimPlan` computed.
     """
 
     import json
@@ -397,14 +363,15 @@ def postprocess_speech(
     except Exception as exc:  # captions raises AlignmentError; treat as unusable
         raise AudioPostprocessError(str(exc)) from exc
 
-    if trim is None:
-        trim = compute_trim(
-            tokens,
-            frame_rate=frame_rate,
-            frames=frames,
-            pre_padding=pre_padding,
-            post_padding=post_padding,
-        )
+    # Always compute the plan from this WAV and alignment: a plan built for a
+    # different frame rate or length would desync the audio and alignment timelines.
+    trim = compute_trim(
+        tokens,
+        frame_rate=frame_rate,
+        frames=frames,
+        pre_padding=pre_padding,
+        post_padding=post_padding,
+    )
 
     offset = trim.start_frame / trim.frame_rate
     shifted = trim_alignment(tokens, offset)

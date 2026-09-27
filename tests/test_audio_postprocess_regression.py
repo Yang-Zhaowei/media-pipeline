@@ -11,6 +11,7 @@ No CUDA is involved: WAV I/O and trimming run on CPU.
 from __future__ import annotations
 
 import json
+import struct
 from pathlib import Path
 
 import pytest
@@ -19,6 +20,7 @@ from media_pipeline.postprocess import (
     DEFAULT_FADE_IN,
     DEFAULT_POST_PADDING,
     DEFAULT_PRE_PADDING,
+    AudioPostprocessError,
     compute_trim,
     postprocess_speech,
     read_wav,
@@ -187,3 +189,63 @@ def _alignment_tokens(raw: list[dict]):
 def alignment_end_start(index: int) -> float:
     raw = _read_alignment()
     return raw[index + 1]["start"] - raw[index]["end"]
+
+
+# --- WAV format validation (crafted files, not the immutable fixture) -------
+
+
+def _write_pcm_wav(
+    path: Path,
+    *,
+    n_channels: int = 1,
+    bits: int = 16,
+    sample_rate: int = 8000,
+    frames: int = 8,
+    junk_before_fmt: int | None = None,
+) -> None:
+    """Build a raw RIFF/WAVE file so we control chunk ordering exactly."""
+
+    bytes_per_sample = bits // 8
+    fmt = struct.pack(
+        "<HHIIHH",
+        1,  # WAVE_FORMAT_PCM
+        n_channels,
+        sample_rate,
+        sample_rate * n_channels * bytes_per_sample,  # byte rate
+        n_channels * bytes_per_sample,  # block align
+        bits,
+    )
+    data = struct.pack("<%dh" % frames, *([1000] * frames))
+    body = b"WAVE"
+    if junk_before_fmt:
+        # 4096 bytes pushes 'fmt ' past the end of a 4096-byte header scan.
+        body += b"JUNK" + struct.pack("<I", junk_before_fmt) + b"\x00" * junk_before_fmt
+    body += b"fmt " + struct.pack("<I", len(fmt)) + fmt
+    body += b"data" + struct.pack("<I", len(data)) + data
+    path.write_bytes(b"RIFF" + struct.pack("<I", len(body)) + body)
+
+
+def test_read_wav_accepts_pcm_with_large_junk_chunk_before_fmt(tmp_path: Path) -> None:
+    # A 4096-byte JUNK chunk moves 'fmt ' to byte 4116, beyond a fixed 4096-byte
+    # header scan. The old fixed-size scan could not find it and rejected this
+    # valid PCM file; the stdlib wave parser handles the chunk ordering.
+    wav = tmp_path / "junk.wav"
+    _write_pcm_wav(wav, junk_before_fmt=4096)
+    samples, frame_rate, frames = read_wav(wav)
+    assert frame_rate == 8000
+    assert frames == 8
+    assert len(samples) == 8
+
+
+def test_read_wav_rejects_stereo(tmp_path: Path) -> None:
+    wav = tmp_path / "stereo.wav"
+    _write_pcm_wav(wav, n_channels=2)
+    with pytest.raises(AudioPostprocessError):
+        read_wav(wav)
+
+
+def test_read_wav_rejects_8bit(tmp_path: Path) -> None:
+    wav = tmp_path / "8bit.wav"
+    _write_pcm_wav(wav, bits=8)
+    with pytest.raises(AudioPostprocessError):
+        read_wav(wav)
