@@ -19,9 +19,9 @@ text
 
 Qwen3-TTS and Qwen3 Forced Aligner have already been validated on the GPU integration host. The repository currently contains the resulting real-world fixture for regression development.
 
-Caption Compiler v0 is implemented and covered by deterministic regression tests.
+Caption Compiler v0 and Audio Postprocess v0 are implemented and covered by deterministic regression tests.
 
-The immediate implementation task is **Audio Postprocess v0**.
+The immediate implementation task is **Production TTS module v0**.
 
 See [`docs/CURRENT.md`](docs/CURRENT.md) for the current project state.
 
@@ -32,6 +32,8 @@ The project separates:
 - model inference from deterministic media processing;
 - portable project logic from host-specific GPU runtimes;
 - development and unit testing from GPU integration testing.
+
+The repository currently includes deterministic caption compilation and audio post-processing, plus verified GPU experiments for Qwen3-TTS and Qwen3 Forced Aligner.
 
 Pure processing components should run without CUDA and remain portable across Windows, Linux, and macOS.
 

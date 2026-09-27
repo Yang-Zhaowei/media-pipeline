@@ -4,7 +4,8 @@ Local-first AI-assisted media processing pipeline.
 Build the Speech Pipeline:
 `text → TTS → forced alignment → audio postprocess → caption compiler → WAV + SRT`
 Caption Compiler v0 is complete.
-Immediate task: **Audio Postprocess v0**.
+Audio Postprocess v0 is complete.
+Immediate task: **Production TTS module v0**.
 Do not expand scope unless explicitly requested.
 ## Repository evidence
 - `experiments/`: previously working GPU smoke tests; reference only.
