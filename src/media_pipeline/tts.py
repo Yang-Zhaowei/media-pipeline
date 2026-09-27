@@ -24,6 +24,7 @@ Scope contract (v0):
 from __future__ import annotations
 
 import math
+import numbers
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Sequence
@@ -114,10 +115,14 @@ def waveform_to_mono_pcm16(samples: Sequence[object]) -> list[int]:
     """Convert a flat, finite mono waveform to deterministic int16 PCM.
 
     v0 expects a single flat mono waveform (as returned by ``wavs[0]``). The
-    contract enforced here is flat + finite + mono:
+    Qwen CustomVoice engine returns a 1-D ``float32`` NumPy waveform, so each
+    sample is a NumPy scalar, not a Python ``float``. The contract enforced here
+    is flat + finite + mono:
 
     - nested or channel-shaped input (any element that is itself a sequence) is
       rejected;
+    - every sample must be a real numeric scalar (Python ``int``/``float`` or a
+      NumPy float scalar); ``bool`` is explicitly rejected as an audio sample;
     - finite values are mapped to int16 with half-up rounding,
       ``q = floor(f * 32768 + 0.5)``, then clamped into the int16 range;
     - non-finite values (NaN, +/-Inf) raise :class:`TTSRuntimeError` rather than
@@ -134,7 +139,7 @@ def waveform_to_mono_pcm16(samples: Sequence[object]) -> list[int]:
             raise TTSRuntimeError(
                 "expected a flat mono waveform, got nested/channel-shaped input"
             )
-        if isinstance(value, bool) or not isinstance(value, (int, float)):
+        if isinstance(value, bool) or not isinstance(value, numbers.Real):
             raise TTSRuntimeError(f"waveform value is not a number: {value!r}")
         f = float(value)
         if math.isnan(f) or math.isinf(f):

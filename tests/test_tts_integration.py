@@ -1,11 +1,15 @@
 """ai-core GPU integration test for the Qwen3-TTS CustomVoice runtime.
 
-This test runs the real model. It is gated so it is skipped everywhere that is
-not the GPU integration host:
+This test runs the real model, so it is gated on a single condition only:
 
-- ``torch`` and ``qwen_tts`` must be importable, and
 - the model path must be provided via the ``MEDIA_PIPELINE_TTS_MODEL``
   environment variable (never hard-coded into the repository).
+
+Absence of ``MEDIA_PIPELINE_TTS_MODEL`` means GPU integration was not requested,
+so the tests skip. When it is set, integration is explicitly requested: a
+missing ``torch``/``qwen_tts``, a CUDA/model-load failure, or a synthesis
+failure must FAIL rather than skip, so this stays the real GPU validation
+while remaining separated from the ordinary CPU suite.
 
 It reads the immutable speech-smoke-001 fixture text (never modifying it),
 synthesizes one utterance, and asserts the output is a valid mono 16-bit PCM

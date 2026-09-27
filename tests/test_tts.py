@@ -9,6 +9,7 @@ WAV round-trip contract the Audio Postprocess stage consumes.
 from __future__ import annotations
 
 import sys
+from fractions import Fraction
 from pathlib import Path
 
 import pytest
@@ -145,6 +146,21 @@ def test_pcm16_treats_integers_as_normalized_floats() -> None:
     # The helper interprets every numeric value as a normalized float (assumed
     # within [-1.0, 1.0]); integers are not treated as already-scaled PCM.
     assert waveform_to_mono_pcm16([0, 1, -1]) == [0, _PCM16_MAX, _PCM16_MIN]
+
+
+def test_pcm16_accepts_non_python_real_scalars_like_numpy_float32() -> None:
+    # The real Qwen CustomVoice waveform is a 1-D float32 ndarray; its samples
+    # are NumPy float32 scalars, which are numbers.Real but NOT Python int/float.
+    # fractions.Fraction is a numbers.Real proxy so this runs on CPU without
+    # depending on NumPy/torch.
+    samples = waveform_to_mono_pcm16([Fraction(1, 2), Fraction(-1, 4)])
+    assert samples == [16384, -8192]
+
+
+def test_pcm16_rejects_bool_as_audio_sample() -> None:
+    # bool is a numbers.Real but must never be treated as a sample value.
+    with pytest.raises(TTSRuntimeError):
+        waveform_to_mono_pcm16([True, False])
 
 
 # --- WAV round-trip contract consumed by Audio Postprocess -----------------

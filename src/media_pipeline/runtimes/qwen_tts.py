@@ -87,8 +87,6 @@ class Qwen3CustomVoiceTTS:
 
         validate_request(request)
 
-        import torch  # lazy: keep CPU imports torch-free
-
         model = self._model
         try:
             wavs, sample_rate = model.generate_custom_voice(
@@ -111,7 +109,13 @@ class Qwen3CustomVoiceTTS:
             )
 
         wave = wavs[0]
-        if not wave:
+        try:
+            n_samples = len(wave)
+        except TypeError as exc:
+            raise TTSRuntimeError(
+                f"model returned a waveform that is not a sequence: {wave!r}"
+            ) from exc
+        if n_samples == 0:
             raise TTSRuntimeError("model returned an empty waveform")
 
         samples = waveform_to_mono_pcm16(wave)
