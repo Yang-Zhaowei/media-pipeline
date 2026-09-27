@@ -47,13 +47,39 @@ Current forced-alignment smoke test succeeded.
 
 TTS:
 
-`/srv/ai/models/speech/tts/`
+### TTS
 
-ASR / alignment:
+Environment:
+
+`/srv/ai/apps/media-pipeline/tts/.venv`
+
+Verified:
+
+- Python 3.12.14
+- PyTorch `2.14.0+cu130`
+- `qwen-tts`
+- CUDA 13.0
+- NVIDIA GeForce RTX 4070
+- `Qwen3-TTS-12Hz-1.7B-CustomVoice`
+- Production TTS v0 GPU integration: 2 tests passed
+- repeated synthesis with one loaded model instance
+- generated output accepted by the project's mono 16-bit PCM WAV reader
+
+Manual integration artifact:
+
+```text
+sample rate: 24000 Hz
+frames:      165120
+duration:    6.88 s
+```
+
+Manual listening check passed.
+
+### ASR / alignment:
 
 `/srv/ai/models/speech/asr/`
 
-Vision:
+### Vision:
 
 `/srv/ai/models/vision/`
 
