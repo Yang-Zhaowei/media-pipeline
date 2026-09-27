@@ -19,7 +19,9 @@ text
 
 Qwen3-TTS and Qwen3 Forced Aligner have already been validated on the GPU integration host. The repository currently contains the resulting real-world fixture for regression development.
 
-The immediate implementation task is **Caption Compiler v0**.
+Caption Compiler v0 is implemented and covered by deterministic regression tests.
+
+The immediate implementation task is **Audio Postprocess v0**.
 
 See [`docs/CURRENT.md`](docs/CURRENT.md) for the current project state.
 
@@ -58,11 +60,12 @@ docs/
 experiments/
   GPU smoke tests that have already been validated
 
+src/
+  media_pipeline/      Portable deterministic processing code
+
 tests/
   fixtures/           Real model outputs used as regression evidence
 ```
-
-Application code will be added under `src/` as components graduate from experiments into tested implementation.
 
 ## Development Model
 

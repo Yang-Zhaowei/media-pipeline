@@ -6,7 +6,7 @@ build-backend = "hatchling.build"
 name = "media-pipeline"
 version = "0.0.0"
 description = "Local-first AI-assisted media processing pipeline"
-readme = "docs/README.md"
+readme = "README.md"
 requires-python = ">=3.10"
 dependencies = []
 
