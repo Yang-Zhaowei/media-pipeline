@@ -39,7 +39,13 @@ from media_pipeline.alignment import (
     validate_request,
     validate_wav,
 )
-from media_pipeline.captions import AlignedToken, build_captions, compile_srt, load_alignment
+from media_pipeline.captions import (
+    AlignedToken,
+    build_captions,
+    compile_srt,
+    load_alignment,
+    parse_alignment,
+)
 from media_pipeline.postprocess import read_wav, write_wav, postprocess_speech
 
 FIXTURE = Path(__file__).resolve().parent / "fixtures" / "speech-smoke-001"
@@ -353,15 +359,45 @@ def test_validate_alignment_requires_at_least_one_token() -> None:
         validate_alignment([], sample_rate=24000, frames=24000)
 
 
-def test_validate_alignment_drops_blank_tokens_but_requires_effective() -> None:
-    with pytest.raises(AlignmentError, match="no effective tokens"):
+def test_validate_alignment_rejects_blank_records() -> None:
+    # The Production boundary rejects blank/whitespace-only records outright;
+    # they are never silently dropped.
+    with pytest.raises(AlignmentError, match="empty or whitespace-only text"):
         validate_alignment(_items(("  ", 0.0, 0.5)), sample_rate=24000, frames=24000)
-    tokens = validate_alignment(
+    with pytest.raises(AlignmentError):
+        validate_alignment(
+            _items(("  ", 0.0, 0.5), ("好", 0.5, 1.0)),
+            sample_rate=24000,
+            frames=24000,
+        )
+
+
+def test_parse_alignment_drops_blank_tokens_but_keeps_effective() -> None:
+    # Caption Compiler downstream semantics are unchanged: blank tokens are
+    # dropped, not rejected, by parse_alignment itself. The effective-token
+    # requirement lives in validate_alignment, not here.
+    tokens = parse_alignment(
         _items(("  ", 0.0, 0.5), ("好", 0.5, 1.0)),
+    )
+    assert tokens == [AlignedToken("好", 0.5, 1.0)]
+    assert parse_alignment(_items(("  ", 0.0, 0.5))) == []
+
+
+def test_validate_alignment_accepts_generator_input() -> None:
+    # The public contract accepts any Iterable[object]; a one-shot generator
+    # must be consumed exactly once, not exhausted by an internal pass.
+    gen = (item for item in _items(("你", 0.0, 0.5), ("好", 0.5, 1.0)))
+    from_generator = validate_alignment(gen, sample_rate=24000, frames=24000)
+    from_list = validate_alignment(
+        _items(("你", 0.0, 0.5), ("好", 0.5, 1.0)),
         sample_rate=24000,
         frames=24000,
     )
-    assert tokens == [AlignedToken("好", 0.5, 1.0)]
+    assert from_generator == from_list
+    assert from_generator == [
+        AlignedToken("你", 0.0, 0.5),
+        AlignedToken("好", 0.5, 1.0),
+    ]
 
 
 @pytest.mark.parametrize("value", [float("nan"), float("inf"), float("-inf")])
@@ -465,6 +501,29 @@ def test_align_maps_runtime_output_and_writes_json(tmp_path, monkeypatch) -> Non
     assert artifact.frames == 48000
     assert artifact.token_count == 2
     assert artifact.duration == pytest.approx(2.0)
+
+
+def test_align_writes_runtime_output_without_normalization(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    # Accepted output is written verbatim: text is not stripped and timestamps
+    # are not coerced (note the integer start written as an integer, not a
+    # float). token_count matches the number of records written to the artifact.
+    items = [("你", 1, 3.0), ("好", 3.0, 4.0)]
+    aligner = _FakeAligner(lambda text: [_FakeResult([_FakeItem(*it) for it in items])])
+    engine = _engine(monkeypatch, aligner)
+    wav = _pcm_wav(tmp_path / "u.wav", frames=96000)
+    out = tmp_path / "a.json"
+
+    artifact = engine.align(_alignment_request(wav), out)
+
+    written = json.loads(out.read_text(encoding="utf-8"))
+    assert written == [
+        {"text": "你", "start": 1, "end": 3.0},
+        {"text": "好", "start": 3.0, "end": 4.0},
+    ]
+    assert artifact.token_count == len(written)
 
 
 def test_align_passes_original_wav_text_and_language(tmp_path, monkeypatch) -> None:
@@ -714,22 +773,22 @@ def test_align_rejects_blank_record_with_invalid_timestamps(
     assert not out.exists()  # no new output is produced
 
 
-def test_align_blank_record_with_valid_timestamps_is_dropped_and_written(
+def test_align_rejects_blank_record_with_valid_timestamps(
     tmp_path,
     monkeypatch,
 ) -> None:
-    # A blank record that carries *valid* timestamps is still dropped by
-    # parse_alignment (unchanged semantics) and the valid record is written.
+    # A whitespace-only runtime record is invalid Production Alignment output
+    # and is rejected, even when its timestamps are otherwise valid. Production
+    # output is preserved, never normalized away.
     items = [_FakeItem("   ", 0.0, 0.5), _FakeItem("你", 0.5, 1.0)]
     aligner = _FakeAligner(lambda t: [_FakeResult(items)])
     engine = _engine(monkeypatch, aligner)
     wav = _pcm_wav(tmp_path / "u.wav", frames=24000)
     out = tmp_path / "a.json"
 
-    artifact = engine.align(_alignment_request(wav), out)
-    written = json.loads(out.read_text(encoding="utf-8"))
-    assert written == [{"text": "你", "start": 0.5, "end": 1.0}]
-    assert artifact.token_count == 1
+    with pytest.raises(AlignmentError):
+        engine.align(_alignment_request(wav), out)
+    assert not out.exists()  # no new output is produced
 
 
 # --- validation failure preserves an existing target (Finding A) -----------

@@ -155,12 +155,13 @@ def validate_alignment(
     """Validate raw alignment records against the input WAV.
 
     First enforces the production alignment output contract on *every* raw
-    record -- blank or not -- via :func:`_reject_invalid_record_timestamps`, so
-    invalid timestamps (non-numeric, non-finite, negative, end-before-start) can
-    never be hidden by blank-token dropping. It then delegates to the Caption
-    Compiler's :func:`~media_pipeline.captions.parse_alignment` so the same
-    normalization, overlap rejection, zero-duration tolerance, and blank-token
-    dropping apply here as downstream, and requires at least one effective token.
+    record -- blank or not -- via :func:`_reject_blank_or_invalid_records`, so
+    blank or whitespace-only records are rejected (never dropped) and invalid
+    timestamps (non-numeric, non-finite, negative, end-before-start) can never
+    be hidden. It then delegates to the Caption Compiler's
+    :func:`~media_pipeline.captions.parse_alignment` so the same normalization,
+    overlap rejection, and zero-duration tolerance apply here as downstream, and
+    requires at least one effective token.
     Finally it rejects an alignment whose final timestamp exceeds the WAV
     duration beyond :data:`_ALIGNMENTS_TOLERANCE`.
 
@@ -169,17 +170,24 @@ def validate_alignment(
     :class:`AlignedToken` list. Raises :class:`AlignmentError` on any problem.
     """
 
-    # Reject malformed timestamps on *every* raw record before blank-dropping.
-    # parse_alignment() drops whitespace-only records before checking their
-    # timestamps, so a blank runtime record carrying NaN/Inf/negative/otherwise
-    # invalid timestamps would otherwise slip past validation and be written.
-    # This boundary check inspects start/end of each record -- blank or not --
+    # Materialize once: the public contract accepts any Iterable[object], and
+    # both passes below consume it, so a generator must not be exhausted by the
+    # first pass.
+    records = list(items)
+
+    # Reject blank or timestamp-invalid records at the Production Alignment
+    # boundary before parse_alignment() runs. parse_alignment() drops
+    # whitespace-only records before checking their timestamps, so a blank
+    # runtime record carrying NaN/Inf/negative/otherwise invalid timestamps
+    # would otherwise slip past validation and be written. This boundary check
+    # rejects blank records outright (Production output is preserved, never
+    # normalized) and inspects the start/end of every record -- blank or not --
     # so invalid data can never be hidden by blank-token dropping. It enforces
     # only per-record validity; ordering/overlap/duration stay with
-    # parse_alignment() on the effective tokens, keeping its semantics intact.
-    _reject_invalid_record_timestamps(items)
+    # parse_alignment() on the accepted records, keeping its semantics intact.
+    _reject_blank_or_invalid_records(records)
 
-    tokens = parse_alignment(items)
+    tokens = parse_alignment(records)
     if not tokens:
         raise AlignmentError("alignment has no effective tokens")
 
@@ -204,17 +212,18 @@ def validate_alignment(
     return tokens
 
 
-def _reject_invalid_record_timestamps(items: Iterable[object]) -> None:
-    """Reject invalid timestamps on every raw record, blank or not.
+def _reject_blank_or_invalid_records(items: Iterable[object]) -> None:
+    """Reject blank or timestamp-invalid records at the Production boundary.
 
-    ``parse_alignment()`` drops whitespace-only records before checking their
-    timestamps, so a blank runtime record carrying NaN/Inf/negative/otherwise
-    invalid timestamps would otherwise bypass validation. This helper inspects
-    the ``start``/``end`` of every record up front so that invalid data can
-    never be hidden by blank-token dropping. It enforces only per-record
-    validity (numeric, finite, non-negative, end >= start); ordering,
-    overlap, and duration checks stay with :func:`parse_alignment` on the
-    effective tokens, so its downstream semantics are unchanged.
+    At the Production Alignment boundary runtime output is preserved, not
+    normalized: whitespace-only or empty records are rejected as invalid
+    production alignment output rather than dropped (as downstream
+    ``parse_alignment`` would), and every record must carry finite,
+    non-negative, end >= start timestamps. ``parse_alignment`` itself keeps its
+    permissive blank-dropping for the Caption Compiler; this check is strictly
+    stricter and runs first. It enforces only per-record validity; ordering and
+    overlap stay with :func:`parse_alignment` on the accepted records, so its
+    downstream semantics are unchanged.
     """
 
     for position, item in enumerate(items):
@@ -223,11 +232,17 @@ def _reject_invalid_record_timestamps(items: Iterable[object]) -> None:
                 f"alignment item {position} must be an object, "
                 f"got {type(item).__name__}"
             )
-        for field in ("start", "end"):
+        for field in ("text", "start", "end"):
             if field not in item:
                 raise AlignmentError(
                     f"alignment item {position} is missing field {field!r}"
                 )
+        raw_text = item["text"]
+        if not isinstance(raw_text, str) or not raw_text.strip():
+            raise AlignmentError(
+                f"alignment item {position} has empty or whitespace-only text"
+            )
+        for field in ("start", "end"):
             value = item[field]
             if isinstance(value, bool) or not isinstance(value, (int, float)):
                 raise AlignmentError(
