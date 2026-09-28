@@ -8,6 +8,7 @@ WAV round-trip contract the Audio Postprocess stage consumes.
 
 from __future__ import annotations
 
+import subprocess
 import sys
 from fractions import Fraction
 from pathlib import Path
@@ -34,12 +35,34 @@ _PCM16_MAX = 32_767
 
 
 def test_importing_media_pipeline_does_not_pull_torch_or_qwen_or_soundfile() -> None:
-    # A fresh interpreter already importing media_pipeline must not have pulled
-    # any heavy runtime dependency. The runtime package stays un-imported too.
-    assert "torch" not in sys.modules
-    assert "qwen_tts" not in sys.modules
-    assert "soundfile" not in sys.modules
-    assert "media_pipeline.runtimes" not in sys.modules
+    # A fresh interpreter importing media_pipeline must not pull any heavy
+    # runtime dependency, and must keep the runtime package un-imported. This
+    # runs in a child interpreter via sys.executable so the result is
+    # independent of the parent pytest process -- which may already have
+    # imported real torch from the GPU integration tests -- and of pytest
+    # collection/execution order. The check inspects the child's own
+    # sys.modules, so parent-process state cannot skew it.
+    script = (
+        "import sys\n"
+        "import media_pipeline\n"
+        "loaded = [\n"
+        "    m for m in (\n"
+        "        'torch', 'qwen_tts', 'qwen_asr',\n"
+        "        'soundfile', 'media_pipeline.runtimes',\n"
+        "    ) if m in sys.modules\n"
+        "]\n"
+        "if loaded:\n"
+        "    print('unexpectedly loaded: ' + ', '.join(loaded))\n"
+        "    sys.exit(1)\n"
+        "sys.exit(0)\n"
+    )
+    result = subprocess.run(
+        [sys.executable, "-c", script],
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+    assert result.returncode == 0, result.stdout or result.stderr
 
 
 # --- CustomVoiceRequest semantics ------------------------------------------
