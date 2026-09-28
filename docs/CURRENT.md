@@ -92,6 +92,22 @@ test is gated on `MEDIA_PIPELINE_ALIGNMENT_MODEL` and skips when it is unset.
 Production Alignment v0 intentionally operates on one already-segmented utterance
 per request; long-text splitting and orchestration remain outside this module.
 
+### Speech Pipeline E2E Validation v0
+Validation code (no product changes): portable harness + gated tests + a two-process ai-core driver.
+
+Implemented:
+- portable, CUDA-free harness `tests/e2e_validation.py`: `run_chain` / `validate_e2e` encoding every required E2E property (WAV unchanged by trim, alignment shift = quantized offset, token/caption/SRT integrity, production postprocess + captions + alignment validation), with tamper hooks
+- CPU unit test `tests/test_speech_pipeline_e2e_unit.py` (10 tests): end-to-end + per-property + failure/injection + negative cases with production interfaces, no CUDA
+- gated real-runtime integration test `tests/test_speech_pipeline_e2e_integration.py`: runs the two production model stages in their own environments (fail-not-skip; skips only when GPU E2E config is unset)
+- two-process ai-core driver `validation/speech_pipeline_e2e.py` + docs, exchanging artifacts through one fresh run dir and printing an audit summary
+- immutable fixtures never substituted for the fresh TTS path; model output checked structurally
+
+Local CPU suite: 223 passed, 6 skipped (was 213 passed, 5 skipped).
+
+The real E2E remains a two-process sequence (Production TTS and Production
+Alignment live in separate ai-core venvs) and is explicitly gated on GPU E2E.
+Real E2E on ai-core is the last step to close the milestone.
+
 ## Verified on ai-core
 - Production Qwen3-TTS CustomVoice integration passes against the real model.
 - Qwen3 ForcedAligner produces character-level Chinese timestamps.
@@ -99,31 +115,22 @@ per request; long-text splitting and orchestration remain outside this module.
 
 ## Next
 
-The Production Alignment module v0 is implemented (promoting the previously
-verified Qwen3 ForcedAligner experiment into portable project code with GPU/
-runtime integration kept separate from pure processing).
+The end-to-end validation harness for the full production Speech Pipeline v0
+is complete on PC_Client (all production stages merged; suite green). Milestone
+closure now depends only on the real ai-core validation.
 
-The boundary mirrors Production TTS v0: portable alignment contracts /
-validation → Qwen ForcedAligner runtime adapter → real ai-core integration.
-
-```text
-portable alignment contracts / validation
-        ↓
-Qwen ForcedAligner runtime adapter
-        ↓
-real ai-core integration
-```
-
-Validate the production stages together end to end:
+Run the two-process E2E once, on ai-core, using the TTS and Alignment
+environments (see `validation/README.md`):
 
 ```text
-→ TTS
-→ forced alignment
-→ audio post-processing
-→ caption compilation
-→ WAV + SRT
+→ TTS          (TTS environment):   text → raw.wav
+→ forced alignment (Alignment env.): raw.wav → alignment.raw.json
+→ audio post-processing (portable): raw.wav + alignment.raw.json → final.wav + adjusted.json
+→ caption compilation (portable):   → final.srt
+→ validate_e2e (all required properties)
 ```
-Successful end-to-end validation closes the Speech Pipeline v0 milestone.
+
+Success on ai-core closes the Speech Pipeline v0 milestone.
 
 ## Not proposed
 
