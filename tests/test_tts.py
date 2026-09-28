@@ -41,9 +41,12 @@ def test_importing_media_pipeline_does_not_pull_torch_or_qwen_or_soundfile() -> 
     # independent of the parent pytest process -- which may already have
     # imported real torch from the GPU integration tests -- and of pytest
     # collection/execution order. The check inspects the child's own
-    # sys.modules, so parent-process state cannot skew it.
+    # sys.modules, so parent-process state cannot skew it. The portable
+    # package lives under src/, which must be on sys.path before import.
+    src = Path(__file__).resolve().parent.parent / "src"
     script = (
         "import sys\n"
+        "sys.path.insert(0, %r)\n"
         "import media_pipeline\n"
         "loaded = [\n"
         "    m for m in (\n"
@@ -55,7 +58,7 @@ def test_importing_media_pipeline_does_not_pull_torch_or_qwen_or_soundfile() -> 
         "    print('unexpectedly loaded: ' + ', '.join(loaded))\n"
         "    sys.exit(1)\n"
         "sys.exit(0)\n"
-    )
+    ) % str(src)
     result = subprocess.run(
         [sys.executable, "-c", script],
         capture_output=True,
