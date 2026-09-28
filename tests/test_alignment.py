@@ -1136,6 +1136,33 @@ def test_align_malformed_result_count_raises_runtime_with_chaining(
     assert isinstance(excinfo.value.__cause__, TypeError)
 
 
+def test_align_broken_len_raises_runtime_with_chaining(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    # A container whose ``__len__()`` itself fails (not a missing ``__len__``,
+    # which raises ``TypeError``) must still be normalized by the runtime
+    # boundary. ``len(results)`` is part of the same narrow third-party
+    # result-inspection boundary as the mapping below, so its arbitrary failure
+    # becomes AlignmentRuntimeError with the original exception chained.
+    class _BrokenLen:
+        def __len__(self):
+            raise RuntimeError("broken len")
+
+        def __iter__(self):
+            return iter([_FakeResult([_FakeItem("你", 0.0, 0.5)])])
+
+    aligner = _FakeAligner(lambda text: _BrokenLen())
+    engine = _engine(monkeypatch, aligner)
+    wav = _pcm_wav(tmp_path / "u.wav", frames=24000)
+
+    with pytest.raises(AlignmentRuntimeError) as excinfo:
+        engine.align(_alignment_request(wav, text="你"), tmp_path / "a.json")
+    assert isinstance(excinfo.value, AlignmentRuntimeError)
+    assert isinstance(excinfo.value.__cause__, RuntimeError)
+    assert not (tmp_path / "a.json").exists()
+
+
 def test_align_runtime_boundary_does_not_swallow_alignment_error(
     tmp_path,
     monkeypatch,

@@ -136,9 +136,17 @@ class Qwen3ForcedAlignment:
         # utterance, so the runtime must return exactly one result set. Reject an
         # unexpected result count up front: a second set would otherwise be
         # silently discarded and the first silently consumed.
+        # Evaluating the runtime container's shape/count is the same narrow
+        # third-party boundary as the result mapping below: ``results`` comes
+        # from outside Production Alignment and its ``__len__()`` is not
+        # guaranteed to raise only ``TypeError`` (for example a container whose
+        # ``__len__`` itself fails with ``RuntimeError``). Catch broadly here so
+        # any exception while inspecting the container shape/count is translated
+        # into ``AlignmentRuntimeError`` with the original exception chained,
+        # per the acceptance contract.
         try:
             result_count = len(results)
-        except TypeError as exc:  # pragma: no cover - runtime specific
+        except Exception as exc:  # pragma: no cover - runtime specific
             raise AlignmentRuntimeError(
                 f"runtime returned malformed alignment: {results!r}"
             ) from exc
