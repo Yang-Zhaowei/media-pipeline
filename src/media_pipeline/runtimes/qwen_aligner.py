@@ -106,9 +106,19 @@ class Qwen3ForcedAlignment:
         bogus target file.
         """
 
-        # Never overwrite the input WAV with an alignment artifact.
+        # Never overwrite the input WAV with an alignment artifact. Reject an
+        # output path that refers to the same underlying file as the input WAV.
+        # The resolved-path comparison catches the identical path and normal
+        # symlink aliases; when both paths exist we additionally compare their
+        # filesystem identity (inode/device) so a hard link to the input WAV is
+        # also rejected -- a hard link has a different name (so resolve() differs)
+        # but shares the inode, and opening it would truncate the original WAV.
         output_path = Path(output_alignment_path)
-        if output_path.resolve() == Path(request.wav_path).resolve():
+        input_path = Path(request.wav_path)
+        if (
+            output_path.resolve() == input_path.resolve()
+            or (output_path.exists() and input_path.exists() and output_path.samefile(input_path))
+        ):
             raise AlignmentRequestError(
                 "alignment output path must not overwrite the input WAV"
             )

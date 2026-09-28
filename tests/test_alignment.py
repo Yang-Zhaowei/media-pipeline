@@ -14,6 +14,7 @@ failure path that does not need the real GPU model is exercised here.
 from __future__ import annotations
 
 import json
+import os
 import struct
 import subprocess
 import sys
@@ -841,6 +842,38 @@ def test_align_refuses_to_overwrite_input_wav(tmp_path, monkeypatch) -> None:
     assert frame_rate == 24000
     assert frames == 24000
     assert samples[0] == 1234
+
+
+def test_align_refuses_to_overwrite_input_wav_via_hard_link(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    # A hard link has a different name (so resolve() differs) but shares the
+    # input WAV's inode. Opening it for writing would truncate the shared inode
+    # and destroy the original WAV, so this must be rejected like the direct
+    # overwrite above. This regression fails against the old resolved-path-only
+    # guard and passes once filesystem identity is checked.
+    wav = _pcm_wav(tmp_path / "input.wav", frames=24000, fill=1234)
+    hardlink_output = tmp_path / "alias.json"
+    os.link(wav, hardlink_output)
+
+    # The two names really refer to the same filesystem object.
+    assert hardlink_output.samefile(wav)
+
+    items = [("你", 0.0, 1.0)]
+    aligner = _FakeAligner(lambda text: [_FakeResult([_FakeItem(*it) for it in items])])
+    engine = _engine(monkeypatch, aligner)
+
+    with pytest.raises(AlignmentRequestError, match="must not overwrite"):
+        engine.align(_alignment_request(wav), hardlink_output)
+
+    # The input WAV is untouched and still readable as PCM with its sample.
+    samples, frame_rate, frames = read_wav(wav)
+    assert frame_rate == 24000
+    assert frames == 24000
+    assert samples[0] == 1234
+    # The hard link still exists, but now points at the unmodified input WAV
+    # (its inode was never truncated), which the sample check above confirms.
 
 
 # --- compatibility with immutable fixture + downstream stages --------------
