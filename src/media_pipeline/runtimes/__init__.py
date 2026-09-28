@@ -12,5 +12,13 @@ Access an adapter explicitly:
 Every heavy import lives inside the adapter; importing this package on a CPU
 host (or one without the model runtime installed) does not import torch.
 
-v0 ships a single adapter: :class:`Qwen3CustomVoiceTTS` (Qwen3-TTS CustomVoice).
+v0 ships two adapters:
+
+- :class:`media_pipeline.runtimes.qwen_tts.Qwen3CustomVoiceTTS` (Qwen3-TTS
+  CustomVoice), and
+- :class:`media_pipeline.runtimes.qwen_aligner.Qwen3ForcedAlignment` (Qwen3
+  ForcedAligner).
+
+Every heavy import lives inside the adapter; importing this package on a CPU
+host (or one without the model runtime installed) does not import torch.
 """

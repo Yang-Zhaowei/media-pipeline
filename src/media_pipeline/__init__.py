@@ -8,7 +8,7 @@ CUDA.
 
 The GPU/model runtime adapters live under :mod:`media_pipeline.runtimes` and are
 intentionally **not** exported here: importing this package never pulls in
-``torch``, ``qwen_tts``, or ``soundfile``.
+``torch``, ``qwen_tts``, ``qwen_asr``, or ``soundfile``.
 """
 
 from .captions import (
@@ -28,6 +28,12 @@ from .captions import (
     load_alignment,
     parse_alignment,
     render_srt,
+)
+from .alignment import (
+    AlignmentArtifact,
+    AlignmentRequest,
+    AlignmentRequestError,
+    AlignmentRuntimeError,
 )
 from .postprocess import (
     DEFAULT_FADE_IN,
@@ -54,10 +60,18 @@ from .tts import (
     waveform_to_mono_pcm16,
 )
 
+# NOTE: alignment.py also defines a ``validate_request``; it is intentionally
+# *not* re-exported at the package root to avoid shadowing the TTS validator.
+# Import it explicitly from :mod:`media_pipeline.alignment` when needed.
+
 __all__ = [
     "AlignedToken",
+    "AlignmentArtifact",
     "AlignmentError",
     "AlignmentMismatchError",
+    "AlignmentRequest",
+    "AlignmentRequestError",
+    "AlignmentRuntimeError",
     "Caption",
     "CaptionError",
     "CustomVoiceError",
