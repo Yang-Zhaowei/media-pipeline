@@ -55,7 +55,8 @@ Verified:
 - NVIDIA GeForce RTX 4070
 - `Qwen3-ForcedAligner-0.6B`
 
-Current status: verified GPU smoke integration; production module not yet implemented.
+Current status: Production Alignment module v0 implemented; GPU integration
+test gated on `MEDIA_PIPELINE_ALIGNMENT_MODEL`, validated on ai-core.
 
 ## Model locations
 

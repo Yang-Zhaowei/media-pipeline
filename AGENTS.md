@@ -1,13 +1,15 @@
 # Media Pipeline
 Local-first AI-assisted media processing pipeline.
 ## Current milestone
-Build the Speech Pipeline:
+Close Speech Pipeline v0 by validating the existing production components end to end:
 `text → TTS → forced alignment → audio postprocess → caption compiler → WAV + SRT`
-Caption Compiler v0 is complete.
-Audio Postprocess v0 is complete.
-Production TTS v0 is complete.
-Immediate task: **Production Alignment module v0**.
-Do not expand scope unless explicitly requested.
+Completed:
+- Caption Compiler v0
+- Audio Postprocess v0
+- Production TTS v0
+- Production Alignment v0
+Immediate task: **full production Speech Pipeline v0 E2E validation**.
+Do not add new modalities, NLE integration, general orchestration, or other scope unless explicitly requested.
 ## Repository evidence
 - `experiments/`: previously working GPU smoke tests; reference only.
 - `tests/fixtures/`: immutable real model outputs used for regression tests.

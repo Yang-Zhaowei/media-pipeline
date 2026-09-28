@@ -2,7 +2,8 @@
 ## Milestone
 Speech Pipeline v0.
 Current task:
-**Production Alignment module v0**
+**End-to-end validation of the full production Speech Pipeline v0**
+`text → TTS → forced alignment → audio postprocess → caption compiler → WAV + SRT`
 ## Completed
 ### Caption Compiler v0
 Merged via PR #1.
@@ -72,6 +73,25 @@ The generated Chinese narration was manually listened to and judged acceptable.
 Production TTS v0 intentionally operates on one already-segmented utterance
 per request; long-text splitting and orchestration remain outside this module.
 
+### Production Alignment v0
+Merged via PR #4.
+Implemented:
+- portable `AlignmentRequest` and `AlignmentArtifact` contracts
+- deterministic raw-record timestamp validation rejecting invalid / blank records
+- validation applied to every raw record (blank or invalid records are rejected before writing)
+- `validate_alignment` enforcing validity and effective-token requirements
+- Qwen3 ForcedAligner GPU runtime adapter (promoted from `experiments/`)
+- heavy runtime dependencies isolated from portable imports
+- one loaded model instance supports repeated alignment
+- output written as the existing `{"text", "start", "end"}` JSON that Audio Postprocess and the Caption Compiler consume
+- CPU unit tests and separately gated GPU integration tests
+
+Portable validation and mapping logic runs without CUDA; the GPU integration
+test is gated on `MEDIA_PIPELINE_ALIGNMENT_MODEL` and skips when it is unset.
+
+Production Alignment v0 intentionally operates on one already-segmented utterance
+per request; long-text splitting and orchestration remain outside this module.
+
 ## Verified on ai-core
 - Production Qwen3-TTS CustomVoice integration passes against the real model.
 - Qwen3 ForcedAligner produces character-level Chinese timestamps.
@@ -79,11 +99,12 @@ per request; long-text splitting and orchestration remain outside this module.
 
 ## Next
 
-Implement Production Alignment module v0 by promoting the already verified
-Qwen3 ForcedAligner experiment into portable project code while keeping
-GPU/runtime integration separate from pure processing.
+The Production Alignment module v0 is implemented (promoting the previously
+verified Qwen3 ForcedAligner experiment into portable project code with GPU/
+runtime integration kept separate from pure processing).
 
-The intended boundary should mirror Production TTS v0:
+The boundary mirrors Production TTS v0: portable alignment contracts /
+validation → Qwen ForcedAligner runtime adapter → real ai-core integration.
 
 ```text
 portable alignment contracts / validation
@@ -93,8 +114,7 @@ Qwen ForcedAligner runtime adapter
 real ai-core integration
 ```
 
-After Production Alignment v0 is complete, validate the production stages
-together end to end:
+Validate the production stages together end to end:
 
 ```text
 → TTS
@@ -105,9 +125,9 @@ together end to end:
 ```
 Successful end-to-end validation closes the Speech Pipeline v0 milestone.
 
-## Later directions
-- HTTP API
-- MCP
-- ASR workflow
-- Vision
-- NLE integration
+## Not proposed
+
+HTTP API, MCP, ASR, Vision, and NLE control are not roadmap milestones and
+are not under development. They become candidates only if a real workflow
+exposes a reproducible gap that passes the Feature admission rule. See
+`docs/ROADMAP.md`.
