@@ -25,9 +25,14 @@ Scope contract (v0):
   timestamp precision preserved.
 - No model, host, or output path is hard-coded here.
 
-Text/alignment *matching* against the original text is the Caption Compiler's
-job (:mod:`media_pipeline.captions`); this module only validates the alignment
-data itself and never performs matching.
+Matching the aligned token text against the original request text is a
+behavior shared with the Caption Compiler (:mod:`media_pipeline.captions`):
+this module reuses that same character-level matching logic
+(:func:`media_pipeline.captions.check_alignment_matches_text`) and performs it
+here, before writing the artifact, rather than only validating the alignment
+data itself. When the aligned text does not match the original request text,
+this raises :class:`~media_pipeline.captions.AlignmentMismatchError`; no
+guessing or repair of the aligned text is performed.
 """
 
 from __future__ import annotations

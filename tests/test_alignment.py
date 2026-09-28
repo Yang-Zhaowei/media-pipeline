@@ -662,14 +662,15 @@ def test_align_empty_results_raises_runtime_with_chaining(
     monkeypatch,
 ) -> None:
     # Zero result sets is a runtime failure, not a mapping IndexError: the
-    # exactly-one result-set count is enforced before mapping.
+    # exactly-one result-set count is enforced before mapping. The violated
+    # count invariant is represented with a chained ValueError.
     aligner = _FakeAligner(lambda text: [])
     engine = _engine(monkeypatch, aligner)
     wav = _pcm_wav(tmp_path / "u.wav", frames=24000)
 
     with pytest.raises(AlignmentRuntimeError) as excinfo:
         engine.align(_alignment_request(wav), tmp_path / "a.json")
-    assert excinfo.value.__cause__ is None
+    assert isinstance(excinfo.value.__cause__, ValueError)
 
 
 def test_align_empty_content_raises_validation_error(tmp_path, monkeypatch) -> None:
@@ -1063,8 +1064,9 @@ def test_align_multiple_result_sets_raises_runtime_error(tmp_path, monkeypatch) 
         engine.align(_alignment_request(wav, text="你好"), tmp_path / "a.json")
 
 
-def test_align_multiple_result_sets_has_no_exception_cause(tmp_path, monkeypatch) -> None:
-    # A result-count mismatch carries no underlying exception to chain.
+def test_align_multiple_result_sets_raises_runtime_with_chaining(tmp_path, monkeypatch) -> None:
+    # A result-count mismatch carries a chained ValueError representing the
+    # violated exactly-one result-set invariant.
     items = [("你", 0.0, 0.5)]
     aligner = _FakeAligner(
         lambda text: [_FakeResult([_FakeItem(*it) for it in items]), _FakeResult([_FakeItem(*it) for it in items])]
@@ -1074,7 +1076,7 @@ def test_align_multiple_result_sets_has_no_exception_cause(tmp_path, monkeypatch
     wav = _pcm_wav(tmp_path / "u.wav", frames=24000)
     with pytest.raises(AlignmentRuntimeError) as excinfo:
         engine.align(_alignment_request(wav, text="你"), tmp_path / "a.json")
-    assert excinfo.value.__cause__ is None
+    assert isinstance(excinfo.value.__cause__, ValueError)
 
 
 def test_align_multiple_result_sets_writes_no_output_file(tmp_path, monkeypatch) -> None:
@@ -1088,6 +1090,81 @@ def test_align_multiple_result_sets_writes_no_output_file(tmp_path, monkeypatch)
     with pytest.raises(AlignmentRuntimeError):
         engine.align(_alignment_request(wav, text="你"), tmp_path / "a.json")
     assert not (tmp_path / "a.json").exists()
+
+
+# --- runtime boundary: malformed result container / shape ----------------
+
+
+def test_align_malformed_result_container_raises_runtime_with_chaining(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    # A one-entry dict passes the len() == 1 count check, but results[0] raises
+    # KeyError. This shape-access failure is translated by the runtime boundary
+    # into AlignmentRuntimeError with the original exception chained, so an
+    # arbitrary third-party container shape never leaks to the caller.
+    items = [("你", 0.0, 0.5)]
+    malformed = {"unexpected": [_FakeResult([_FakeItem(*it) for it in items])]}  # type: ignore[dict-item]
+    aligner = _FakeAligner(lambda text: malformed)
+    engine = _engine(monkeypatch, aligner)
+    wav = _pcm_wav(tmp_path / "u.wav", frames=24000)
+
+    with pytest.raises(AlignmentRuntimeError) as excinfo:
+        engine.align(_alignment_request(wav, text="你"), tmp_path / "a.json")
+    assert isinstance(excinfo.value, AlignmentRuntimeError)
+    assert isinstance(excinfo.value.__cause__, KeyError)
+    assert not (tmp_path / "a.json").exists()
+
+
+def test_align_malformed_result_count_raises_runtime_with_chaining(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    # A non-length container (len raises TypeError) is also a runtime boundary
+    # failure, translated into AlignmentRuntimeError with chaining.
+    class _NoLen:
+        def __iter__(self):
+            return iter([_FakeResult([_FakeItem("你", 0.0, 0.5)])])
+
+    aligner = _FakeAligner(lambda text: _NoLen())
+    engine = _engine(monkeypatch, aligner)
+    wav = _pcm_wav(tmp_path / "u.wav", frames=24000)
+
+    with pytest.raises(AlignmentRuntimeError) as excinfo:
+        engine.align(_alignment_request(wav, text="你"), tmp_path / "a.json")
+    assert isinstance(excinfo.value, AlignmentRuntimeError)
+    assert isinstance(excinfo.value.__cause__, TypeError)
+
+
+def test_align_runtime_boundary_does_not_swallow_alignment_error(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    # The broad runtime-boundary catch must not swallow semantic Production
+    # Alignment validation failures: an alignment that ends past the WAV
+    # duration still raises AlignmentError, not AlignmentRuntimeError.
+    items = [("你", 0.0, 100.0)]
+    aligner = _FakeAligner(lambda text: [_FakeResult([_FakeItem(*it) for it in items])])
+    engine = _engine(monkeypatch, aligner)
+    wav = _pcm_wav(tmp_path / "u.wav", frames=24000)
+
+    with pytest.raises(AlignmentError):
+        engine.align(_alignment_request(wav, text="你"), tmp_path / "a.json")
+
+
+def test_align_runtime_boundary_does_not_swallow_mismatch_error(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    # Likewise, an alignment-text mismatch must keep AlignmentMismatchError
+    # rather than being wrapped as a runtime error by the boundary catch.
+    items = [("好", 0.0, 1.0)]
+    aligner = _FakeAligner(lambda text: [_FakeResult([_FakeItem(*it) for it in items])])
+    engine = _engine(monkeypatch, aligner)
+    wav = _pcm_wav(tmp_path / "u.wav", frames=24000)
+
+    with pytest.raises(AlignmentMismatchError):
+        engine.align(_alignment_request(wav, text="你"), tmp_path / "a.json")
 
 
 # =====================================================================

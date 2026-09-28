@@ -143,19 +143,39 @@ class Qwen3ForcedAlignment:
                 f"runtime returned malformed alignment: {results!r}"
             ) from exc
         if result_count != 1:
+            # The contract is exactly one result set. Represent the violated
+            # invariant with a narrow internal ValueError and chain it, so the
+            # result-count failure satisfies ``AlignmentRuntimeError`` with a
+            # meaningful underlying cause (see the acceptance contract's
+            # "unexpected result shape/count -> AlignmentRuntimeError with
+            # chaining").
             raise AlignmentRuntimeError(
                 f"runtime returned {result_count} result set(s); expected exactly 1"
+            ) from ValueError(
+                f"expected exactly 1 result set, got {result_count}"
             )
 
         # Map the single result set in order. Do not sort, round, repair, add,
         # or remove: this preserves the model's exact timestamp precision and
         # content for the downstream stages.
+        #
+        # This is the narrow runtime boundary translating third-party result
+        # container/shape failures into the Production runtime error taxonomy:
+        # a malformed container (for example ``{"unexpected": result}`` where
+        # ``len(results) == 1`` but ``results[0]`` raises ``KeyError``), an
+        # unexpected result-set shape, or an unexpected runtime-item shape must
+        # not leak an arbitrary exception to callers. A broad ``except
+        # Exception`` is acceptable here only because this boundary is exactly
+        # the place that maps untrusted runtime representation failures into
+        # ``AlignmentRuntimeError``. Semantic Production Alignment validation
+        # (``AlignmentError`` / ``AlignmentMismatchError``) happens below, outside
+        # this boundary, so it is never swallowed as a runtime error.
         try:
             raw = [
                 {"text": item.text, "start": item.start_time, "end": item.end_time}
                 for item in results[0]
             ]
-        except (IndexError, TypeError, AttributeError) as exc:  # pragma: no cover - runtime specific
+        except Exception as exc:  # pragma: no cover - runtime specific
             raise AlignmentRuntimeError(
                 f"runtime returned malformed alignment: {results!r}"
             ) from exc
