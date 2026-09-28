@@ -108,8 +108,10 @@ class Qwen3ForcedAlignment:
 
         aligner = self._aligner
         try:
+            # Runtime boundary: qwen_asr accepts a string filesystem path, so
+            # convert the public Path here and only here.
             results = aligner.align(
-                audio=request.wav_path,
+                audio=str(request.wav_path),
                 text=request.text,
                 language=request.language,
             )
@@ -134,9 +136,21 @@ class Qwen3ForcedAlignment:
         # Validate the complete result before writing anything.
         tokens = validate_alignment(raw, sample_rate=sample_rate, frames=frames)
 
+        # Write the validated effective records, not the raw list: this keeps the
+        # written JSON and token_count consistent (blank records that carry
+        # invalid timestamps are rejected above; valid blank records are dropped
+        # here, matching the count the downstream stages consume).
         try:
             with open(output_path, "w", encoding="utf-8", newline="\n") as handle:
-                json.dump(raw, handle, ensure_ascii=False, indent=2)
+                json.dump(
+                    [
+                        {"text": token.text, "start": token.start, "end": token.end}
+                        for token in tokens
+                    ],
+                    handle,
+                    ensure_ascii=False,
+                    indent=2,
+                )
                 handle.write("\n")
         except OSError:
             raise

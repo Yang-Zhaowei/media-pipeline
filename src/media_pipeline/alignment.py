@@ -32,6 +32,7 @@ data itself and never performs matching.
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable
@@ -153,17 +154,30 @@ def validate_alignment(
 ) -> list[AlignedToken]:
     """Validate raw alignment records against the input WAV.
 
-    Reuses the Caption Compiler's :func:`~media_pipeline.captions.parse_alignment`
-    so the same normalization, finite/bool/negative rejection, end-before-start
-    rejection, overlap rejection, zero-duration tolerance, and blank-token
-    dropping apply here as downstream. It then requires at least one effective
-    token and rejects an alignment whose final timestamp exceeds the WAV
+    First enforces the production alignment output contract on *every* raw
+    record -- blank or not -- via :func:`_reject_invalid_record_timestamps`, so
+    invalid timestamps (non-numeric, non-finite, negative, end-before-start) can
+    never be hidden by blank-token dropping. It then delegates to the Caption
+    Compiler's :func:`~media_pipeline.captions.parse_alignment` so the same
+    normalization, overlap rejection, zero-duration tolerance, and blank-token
+    dropping apply here as downstream, and requires at least one effective token.
+    Finally it rejects an alignment whose final timestamp exceeds the WAV
     duration beyond :data:`_ALIGNMENTS_TOLERANCE`.
 
     The timestamps are compared to the WAV duration but never rewritten,
     rounded, sorted, truncated, added to, or removed. Returns the validated
     :class:`AlignedToken` list. Raises :class:`AlignmentError` on any problem.
     """
+
+    # Reject malformed timestamps on *every* raw record before blank-dropping.
+    # parse_alignment() drops whitespace-only records before checking their
+    # timestamps, so a blank runtime record carrying NaN/Inf/negative/otherwise
+    # invalid timestamps would otherwise slip past validation and be written.
+    # This boundary check inspects start/end of each record -- blank or not --
+    # so invalid data can never be hidden by blank-token dropping. It enforces
+    # only per-record validity; ordering/overlap/duration stay with
+    # parse_alignment() on the effective tokens, keeping its semantics intact.
+    _reject_invalid_record_timestamps(items)
 
     tokens = parse_alignment(items)
     if not tokens:
@@ -188,3 +202,51 @@ def validate_alignment(
         )
 
     return tokens
+
+
+def _reject_invalid_record_timestamps(items: Iterable[object]) -> None:
+    """Reject invalid timestamps on every raw record, blank or not.
+
+    ``parse_alignment()`` drops whitespace-only records before checking their
+    timestamps, so a blank runtime record carrying NaN/Inf/negative/otherwise
+    invalid timestamps would otherwise bypass validation. This helper inspects
+    the ``start``/``end`` of every record up front so that invalid data can
+    never be hidden by blank-token dropping. It enforces only per-record
+    validity (numeric, finite, non-negative, end >= start); ordering,
+    overlap, and duration checks stay with :func:`parse_alignment` on the
+    effective tokens, so its downstream semantics are unchanged.
+    """
+
+    for position, item in enumerate(items):
+        if not isinstance(item, dict):
+            raise AlignmentError(
+                f"alignment item {position} must be an object, "
+                f"got {type(item).__name__}"
+            )
+        for field in ("start", "end"):
+            if field not in item:
+                raise AlignmentError(
+                    f"alignment item {position} is missing field {field!r}"
+                )
+            value = item[field]
+            if isinstance(value, bool) or not isinstance(value, (int, float)):
+                raise AlignmentError(
+                    f"alignment item {position} field {field!r} must be a "
+                    f"number, got {value!r}"
+                )
+            seconds = float(value)
+            if not math.isfinite(seconds):
+                raise AlignmentError(
+                    f"alignment item {position} field {field!r} must be "
+                    f"finite, got {value!r}"
+                )
+        start = float(item["start"])
+        end = float(item["end"])
+        if start < 0:
+            raise AlignmentError(f"alignment item {position} starts before zero: {start}")
+        if end < 0:
+            raise AlignmentError(f"alignment item {position} field 'end' is negative: {end}")
+        if end < start:
+            raise AlignmentError(
+                f"alignment item {position} ends before it starts: {start} > {end}"
+            )

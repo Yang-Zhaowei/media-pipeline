@@ -479,7 +479,9 @@ def test_align_passes_original_wav_text_and_language(tmp_path, monkeypatch) -> N
     )
 
     audio, text, language = aligner.align_calls[0]
-    assert str(audio) == str(wav)  # the original WAV path is used
+    # Runtime boundary: qwen_asr receives a string filesystem path, not a Path.
+    assert isinstance(audio, str)
+    assert audio == str(wav)  # the original WAV path, as a string
     assert text == "你好"
     assert language == "Chinese"
 
@@ -677,6 +679,86 @@ def test_failed_alignment_validation_writes_no_file(tmp_path, monkeypatch) -> No
     with pytest.raises(AlignmentError):
         engine.align(_alignment_request(wav), out)
     assert not out.exists()
+
+
+# --- blank runtime records cannot bypass timestamp validation -------------
+
+
+@pytest.mark.parametrize(
+    ("text", "start", "end"),
+    [
+        ("   ", float("nan"), 0.5),       # non-finite in a blank record
+        ("  ", float("inf"), 0.5),        # non-finite in a blank record
+        ("   ", -1.0, 0.5),               # negative start in a blank record
+        ("  ", 1.0, -0.5),                # negative end in a blank record
+        ("   ", 1.0, 0.0),                # end before start in a blank record
+    ],
+)
+def test_align_rejects_blank_record_with_invalid_timestamps(
+    tmp_path,
+    monkeypatch,
+    text,
+    start,
+    end,
+) -> None:
+    # A whitespace-only runtime record with an invalid timestamp must NOT be
+    # silently dropped-and-written: it is rejected at the alignment boundary.
+    items = [_FakeItem(text, start, end)]
+    aligner = _FakeAligner(lambda t: [_FakeResult(items)])
+    engine = _engine(monkeypatch, aligner)
+    wav = _pcm_wav(tmp_path / "u.wav", frames=24000)
+    out = tmp_path / "a.json"
+
+    with pytest.raises(AlignmentError):
+        engine.align(_alignment_request(wav), out)
+    assert not out.exists()  # no new output is produced
+
+
+def test_align_blank_record_with_valid_timestamps_is_dropped_and_written(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    # A blank record that carries *valid* timestamps is still dropped by
+    # parse_alignment (unchanged semantics) and the valid record is written.
+    items = [_FakeItem("   ", 0.0, 0.5), _FakeItem("你", 0.5, 1.0)]
+    aligner = _FakeAligner(lambda t: [_FakeResult(items)])
+    engine = _engine(monkeypatch, aligner)
+    wav = _pcm_wav(tmp_path / "u.wav", frames=24000)
+    out = tmp_path / "a.json"
+
+    artifact = engine.align(_alignment_request(wav), out)
+    written = json.loads(out.read_text(encoding="utf-8"))
+    assert written == [{"text": "你", "start": 0.5, "end": 1.0}]
+    assert artifact.token_count == 1
+
+
+# --- validation failure preserves an existing target (Finding A) -----------
+
+
+def test_failed_validation_does_not_overwrite_existing_output(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    # Sentinel: pre-create the output with known content, then trigger a
+    # validation failure before writing. The existing content must be unchanged,
+    # proving "failed validation does not overwrite output" (no atomic-write
+    # redesign; crash-safe replacement is outside v0).
+    out = tmp_path / "a.json"
+    original = json.dumps(
+        [{"text": "preserved", "start": 0.0, "end": 1.0}]
+    ) + "\n"
+    out.write_text(original, encoding="utf-8")
+
+    # Alignment ends past the WAV duration -> AlignmentError, nothing written.
+    items = [("你", 0.0, 100.0)]
+    aligner = _FakeAligner(lambda t: [_FakeResult([_FakeItem(*it) for it in items])])
+    engine = _engine(monkeypatch, aligner)
+    wav = _pcm_wav(tmp_path / "u.wav", frames=24000)
+
+    with pytest.raises(AlignmentError):
+        engine.align(_alignment_request(wav), out)
+
+    assert out.read_text(encoding="utf-8") == original
 
 
 # --- output must not overwrite the input WAV -------------------------------

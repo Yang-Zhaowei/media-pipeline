@@ -108,3 +108,44 @@ def test_engine_loads_model_once_and_aligns_twice(tmp_path: Path) -> None:
     assert second.token_count > 0
     assert first.token_count == second.token_count
     assert engine._aligner is not None
+
+
+@skip_integration
+def test_real_alignment_consumed_by_postprocess_and_captions(tmp_path: Path) -> None:
+    # Establish that a *fresh real* qwen_asr alignment (not the historical
+    # fixture) satisfies the downstream production contracts. We do not compare
+    # against alignment.raw.json -- we only require that the newly produced
+    # alignment flows through Audio Postprocess and the Caption Compiler.
+    from media_pipeline.captions import build_captions, compile_srt, load_alignment
+    from media_pipeline.runtimes.qwen_aligner import Qwen3ForcedAlignment
+    from media_pipeline.postprocess import postprocess_speech
+
+    engine = Qwen3ForcedAlignment(Path(_MODEL_PATH))  # type: ignore[arg-type]
+
+    wav = FIXTURE_WAV
+    text = ORIGINAL_TEXT.read_text(encoding="utf-8")
+    request = AlignmentRequest(wav_path=wav, text=text, language="Chinese")
+
+    produced = tmp_path / "alignment.json"
+    artifact = engine.align(request, produced)
+    assert artifact.token_count > 0
+
+    # real Qwen alignment -> Audio Postprocess -> Caption Compiler.
+    cleaned_wav = tmp_path / "cleaned.wav"
+    adjusted_alignment = tmp_path / "adjusted.json"
+    postprocess_speech(wav, produced, cleaned_wav, adjusted_alignment)
+
+    adjusted = load_alignment(adjusted_alignment)
+    assert len(adjusted) == artifact.token_count  # postprocess preserves count
+
+    # The Caption Compiler consumes the freshly produced alignment and reconstructs
+    # the original text exactly (deterministic, no guessing).
+    captions = build_captions(text, adjusted)
+    joined = "".join(caption.text for caption in captions)
+    assert "".join(joined.split()) == "".join(text.split())
+    srt = compile_srt(text, adjusted)
+    assert srt
+
+    # The adjusted alignment stays within the cleaned WAV duration.
+    rate, frames = validate_wav(cleaned_wav)
+    assert adjusted[-1].end <= frames / rate + 1e-6
