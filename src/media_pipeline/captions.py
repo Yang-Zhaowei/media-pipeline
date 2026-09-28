@@ -39,7 +39,9 @@ __all__ = [
     "DEFAULT_PAUSE_THRESHOLD",
     "DEFAULT_SOFT_BREAK_AFTER",
     "build_captions",
+    "check_alignment_matches_text",
     "compile_srt",
+    "has_alignable_content",
     "format_timestamp",
     "load_alignment",
     "parse_alignment",
@@ -186,6 +188,19 @@ def _is_skippable(char: str) -> bool:
     return char.isspace() or unicodedata.category(char)[0] in _SKIPPABLE_CATEGORIES
 
 
+def has_alignable_content(text: str) -> bool:
+    """True if ``text`` contains at least one spoken (aligned) character.
+
+    Reuses the Caption Compiler's non-spoken definition -- whitespace and
+    punctuation/separators (see :func:`_is_skippable`) -- so a request of only
+    whitespace and/or punctuation is treated identically by the request
+    validator as it would be by the caption splitter: it carries nothing to
+    align. This is the portable check used to reject no-alignable requests.
+    """
+
+    return any(not _is_skippable(char) for char in text)
+
+
 class _CharTiming(NamedTuple):
     """Timing inherited by one character of the original text."""
 
@@ -243,6 +258,23 @@ def _assign_timings(
         )
 
     return timings
+
+
+def check_alignment_matches_text(
+    original_text: str, tokens: Sequence[AlignedToken]
+) -> None:
+    """Raise :class:`AlignmentMismatchError` if aligned tokens do not match text.
+
+    This is the exact character-level matching :func:`build_captions` performs
+    internally (via :func:`_assign_timings`); reusing it here keeps the
+    production adapter's pre-write consistency check identical to the Caption
+    Compiler downstream. Missing, extra, or incorrect aligned tokens all raise;
+    whitespace and punctuation in the original text are consumed from the
+    aligned tokens in order and never count as a mismatch. It only validates
+    consistency and never mutates the tokens.
+    """
+
+    _assign_timings(original_text, tokens)
 
 
 def _content_weight(char: str) -> int:
