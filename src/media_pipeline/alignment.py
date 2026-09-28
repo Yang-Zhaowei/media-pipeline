@@ -33,11 +33,12 @@ data itself and never performs matching.
 from __future__ import annotations
 
 import math
+import struct
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable
 
-from .captions import AlignedToken, AlignmentError, parse_alignment
+from .captions import AlignedToken, AlignmentError, has_alignable_content, parse_alignment
 from .postprocess import AudioPostprocessError, read_wav
 
 __all__ = [
@@ -107,13 +108,21 @@ class AlignmentArtifact:
 def validate_request(request: AlignmentRequest) -> None:
     """Validate a request before it reaches the runtime.
 
-    ``text`` and ``language`` must be non-empty strings. Raises
-    :class:`AlignmentRequestError` otherwise.
+    ``text`` and ``language`` must be non-empty strings, and ``text`` must
+    contain alignable content (not only whitespace or punctuation). Raises
+    :class:`AlignmentRequestError` otherwise. The alignable-content check
+    reuses the Caption Compiler's non-spoken definition so a request that
+    carries nothing to align is rejected deterministically, before inference.
     """
 
     if not isinstance(request.text, str) or not request.text.strip():
         raise AlignmentRequestError(
             "AlignmentRequest.text must be a non-empty string"
+        )
+    if not has_alignable_content(request.text):
+        raise AlignmentRequestError(
+            "AlignmentRequest.text must contain alignable content "
+            "(whitespace or punctuation only is not alignable)"
         )
     if not isinstance(request.language, str) or not request.language.strip():
         raise AlignmentRequestError(
@@ -133,7 +142,12 @@ def validate_wav(wav_path: str | Path) -> tuple[int, int]:
 
     try:
         _samples, sample_rate, frames = read_wav(wav_path)
-    except AudioPostprocessError as exc:
+    except (AudioPostprocessError, OSError, EOFError, struct.error, ValueError) as exc:
+        # A missing, unreadable, malformed, corrupt, or truncated WAV is a
+        # request/input failure. ``read_wav`` wraps format/decoding problems in
+        # AudioPostprocessError, but a truncated data region can leak a low-level
+        # ``struct.error`` from PCM unpacking; catch these input-decoding errors
+        # here so they surface uniformly as AlignmentRequestError with chaining.
         raise AlignmentRequestError(f"input WAV is invalid: {exc}") from exc
 
     if not isinstance(sample_rate, int) or sample_rate <= 0:

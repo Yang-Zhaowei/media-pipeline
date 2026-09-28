@@ -39,6 +39,7 @@ from ..alignment import (
     validate_request,
     validate_wav,
 )
+from ..captions import check_alignment_matches_text
 
 __all__ = ["Qwen3ForcedAlignment"]
 
@@ -59,12 +60,20 @@ class Qwen3ForcedAlignment:
     def _load_aligner(self):
         """Load the Qwen3 ForcedAligner model once and reuse it.
 
-        ``torch`` and ``qwen_asr`` are imported lazily here only. Any model-load
-        failure is reported as :class:`AlignmentRuntimeError` with chaining.
+        ``torch`` and ``qwen_asr`` are imported lazily here only -- never at
+        module import time -- so merely importing the portable surface does not
+        require them. Missing dependencies, model-loading, and initialization
+        failures all cross the runtime boundary, so they are reported as
+        :class:`AlignmentRuntimeError` with chaining.
         """
 
-        import torch  # lazy: only when an engine is actually created
-        from qwen_asr import Qwen3ForcedAligner  # lazy
+        try:
+            import torch  # lazy: only when an engine is actually created
+            from qwen_asr import Qwen3ForcedAligner  # lazy
+        except Exception as exc:  # pragma: no cover - runtime specific
+            raise AlignmentRuntimeError(
+                f"failed to import Qwen3 ForcedAligner runtime: {exc}"
+            ) from exc
 
         try:
             return Qwen3ForcedAligner.from_pretrained(
@@ -87,11 +96,14 @@ class Qwen3ForcedAlignment:
         Mirrors the verified smoke test: ``validate_request`` and
         ``validate_wav`` gate bad input (raising :class:`AlignmentRequestError`),
         the loaded engine aligns the *original* WAV path with the request's
-        ``text`` / ``language``, the single-sample result is mapped in order into
-        the existing public alignment representation without sorting or rounding,
-        ``validate_alignment`` gates malformed output (raising
-        :class:`AlignmentError`), and only then is the JSON written so a failed
-        validation never creates a bogus target file.
+        ``text`` / ``language``, the runtime must return exactly one result set
+        (raising :class:`AlignmentRuntimeError` otherwise), the single result is
+        mapped in order into the existing public alignment representation without
+        sorting or rounding, ``validate_alignment`` gates malformed output
+        (raising :class:`AlignmentError`), the aligned text is matched against the
+        original request text (raising :class:`AlignmentMismatchError` otherwise),
+        and only then is the JSON written so a failed validation never creates a
+        bogus target file.
         """
 
         # Never overwrite the input WAV with an alignment artifact.
@@ -120,9 +132,24 @@ class Qwen3ForcedAlignment:
                 f"failed to align utterance: {exc}"
             ) from exc
 
-        # Map the single-sample result in order. Do not sort, round, repair,
-        # add, or remove: this preserves the model's exact timestamp precision
-        # and content for the downstream stages.
+        # A Production Alignment request represents exactly one already-segmented
+        # utterance, so the runtime must return exactly one result set. Reject an
+        # unexpected result count up front: a second set would otherwise be
+        # silently discarded and the first silently consumed.
+        try:
+            result_count = len(results)
+        except TypeError as exc:  # pragma: no cover - runtime specific
+            raise AlignmentRuntimeError(
+                f"runtime returned malformed alignment: {results!r}"
+            ) from exc
+        if result_count != 1:
+            raise AlignmentRuntimeError(
+                f"runtime returned {result_count} result set(s); expected exactly 1"
+            )
+
+        # Map the single result set in order. Do not sort, round, repair, add,
+        # or remove: this preserves the model's exact timestamp precision and
+        # content for the downstream stages.
         try:
             raw = [
                 {"text": item.text, "start": item.start_time, "end": item.end_time}
@@ -135,6 +162,12 @@ class Qwen3ForcedAlignment:
 
         # Validate the complete result before writing anything.
         tokens = validate_alignment(raw, sample_rate=sample_rate, frames=frames)
+
+        # Match the aligned token text against the original utterance text before
+        # writing. Reuses the Caption Compiler's character-level matching so a
+        # stale alignment (missing, extra, or incorrect aligned text) fails with
+        # AlignmentMismatchError instead of silently overwriting the target.
+        check_alignment_matches_text(request.text, tokens)
 
         # Write the original mapped runtime records, unmodified. Blank records
         # are rejected above and invalid timestamps are rejected above, so every
