@@ -1439,6 +1439,7 @@ try:
         AlignmentRequest,
         AlignmentRequestError,
         AlignmentRuntimeError,
+        fault_is_io_error,
     )
     from media_pipeline.captions import (
         AlignmentError,
@@ -1446,9 +1447,12 @@ try:
     )
     from media_pipeline.runtimes.qwen_aligner import Qwen3ForcedAlignment
 
-    # Deterministic per-segment failures (bad input WAV, malformed output, text
-    # mismatch) are isolatable; model-runtime failures stop the whole run.
-    _DETERMINISTIC = (AlignmentRequestError, AlignmentError, AlignmentMismatchError)
+    # Per-segment deterministic validation failures (malformed output, text
+    # mismatch, input-WAV format error) are isolatable; model-runtime faults and
+    # any input I/O fault (an unreadable/missing input WAV wraps OSError) stop
+    # the whole run. ``AlignmentRequestError`` can be either, so inspect it.
+    _ISOLATABLE = (AlignmentError, AlignmentMismatchError)
+    _IO_OR_REQUEST = (AlignmentRequestError,)
 
     segments_dir = Path(task_dict["run_dir"]) / "segments"
     segments_dir.mkdir(parents=True, exist_ok=True)
@@ -1472,7 +1476,16 @@ try:
                 ),
                 out_align,
             )
-        except _DETERMINISTIC as exc:
+        except _IO_OR_REQUEST as exc:
+            # A request error is an isolatable deterministic validation failure
+            # only when it is not caused by a filesystem I/O error.
+            if fault_is_io_error(exc):
+                _dump({"runtime_error": f"alignment input I/O failure on segment {seg['id']!r}: {exc}",
+                       "segments": results})
+                sys.exit(2)
+            results.append({"segment_id": seg["id"], "status": "alignment_failed", "reason": str(exc)})
+            continue
+        except _ISOLATABLE as exc:
             results.append({"segment_id": seg["id"], "status": "alignment_failed", "reason": str(exc)})
             continue
         except AlignmentRuntimeError as exc:

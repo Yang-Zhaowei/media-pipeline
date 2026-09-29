@@ -888,6 +888,160 @@ sys.exit(1)
     assert "cuda out of memory" in result["runtime_error"]
 
 
+# --- C5: alignment fault taxonomy (I/O stops, validation isolates) --------
+
+
+def test_fault_is_io_error_classifies_cause_chain() -> None:
+    """``fault_is_io_error`` separates filesystem faults from validation errors."""
+
+    from media_pipeline.alignment import (
+        AlignmentRequestError,
+        fault_is_io_error,
+    )
+    from media_pipeline.captions import AlignmentMismatchError
+    from media_pipeline.postprocess import AudioPostprocessError
+
+    # Directly wrapped OSError (a missing input WAV read): the handler's
+    # implicit chaining sets ``__cause__`` to the caught OSError.
+    missing = AlignmentRequestError("input WAV is invalid")
+    missing.__cause__ = FileNotFoundError("missing input wav")
+    assert fault_is_io_error(missing) is True
+
+    # OSError two levels deep (OSError -> AudioPostprocessError ->
+    # AlignmentRequestError), exactly as read_wav / validate_wav build it.
+    denied = AlignmentRequestError("input WAV is invalid")
+    denied.__cause__ = AudioPostprocessError("cannot read WAV")
+    denied.__cause__.__cause__ = PermissionError("denied")
+    assert fault_is_io_error(denied) is True
+
+    # A genuine per-segment validation failure carries no OSError in its chain.
+    format_error = AlignmentRequestError("input WAV is not mono 16-bit")
+    assert fault_is_io_error(format_error) is False
+
+    # An output-validation failure is never an I/O fault.
+    mismatch_error = AlignmentMismatchError("aligned text does not match")
+    assert fault_is_io_error(mismatch_error) is False
+
+
+def test_alignment_io_fault_reported_as_runtime_stop(tmp_path) -> None:
+    """A WAV-reading I/O fault is reported as ``runtime_error`` (run stops).
+
+    The child reproduces the production alignment stage's classification: an
+    ``AlignmentRequestError`` caused by ``OSError`` is dumped as a run-level
+    ``runtime_error`` and exits non-zero, so the parent stops the run instead
+    of isolating it as ``alignment_failed`` (C5).
+    """
+
+    import sys
+
+    fake_stage = r"""
+import json
+import sys
+from pathlib import Path
+
+spec = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
+_manifest = spec["manifest"]
+
+from media_pipeline.alignment import (
+    AlignmentRequest,
+    AlignmentRequestError,
+    AlignmentRuntimeError,
+    fault_is_io_error,
+)
+from media_pipeline.captions import AlignmentError, AlignmentMismatchError
+
+_ISOLATABLE = (AlignmentError, AlignmentMismatchError)
+_IO_OR_REQUEST = (AlignmentRequestError,)
+
+
+def _dump(manifest):
+    Path(_manifest).write_text(json.dumps(manifest) + "\n", encoding="utf-8")
+
+
+try:
+    try:
+        raise FileNotFoundError("missing input wav")
+    except OSError as exc:
+        raise AlignmentRequestError(f"input WAV is invalid: {exc}") from exc
+except _IO_OR_REQUEST as exc:
+    if fault_is_io_error(exc):
+        _dump({"runtime_error": "alignment input I/O failure", "segments": []})
+        sys.exit(2)
+    _dump({"runtime_error": None, "segments": [
+        {"segment_id": "io", "status": "alignment_failed", "reason": str(exc)}]})
+    sys.exit(0)
+except _ISOLATABLE as exc:
+    _dump({"runtime_error": None, "segments": [
+        {"segment_id": "io", "status": "alignment_failed", "reason": str(exc)}]})
+    sys.exit(0)
+except AlignmentRuntimeError as exc:
+    _dump({"runtime_error": str(exc), "segments": []})
+    sys.exit(2)
+sys.exit(0)
+"""
+    result = _run_model_stage(
+        sys.executable, fake_stage, ("model", {"segments": []})
+    )
+    assert result["runtime_error"] == "alignment input I/O failure"
+    assert result["segments"] == []
+
+
+def test_alignment_validation_fault_reported_as_isolated(tmp_path) -> None:
+    """A text-mismatch validation failure is isolated as ``alignment_failed``."""
+
+    import sys
+
+    fake_stage = r"""
+import json
+import sys
+from pathlib import Path
+
+spec = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
+_manifest = spec["manifest"]
+
+from media_pipeline.alignment import (
+    AlignmentRequestError,
+    AlignmentRuntimeError,
+    fault_is_io_error,
+)
+from media_pipeline.captions import AlignmentError, AlignmentMismatchError
+
+_ISOLATABLE = (AlignmentError, AlignmentMismatchError)
+_IO_OR_REQUEST = (AlignmentRequestError,)
+
+
+def _dump(manifest):
+    Path(_manifest).write_text(json.dumps(manifest) + "\n", encoding="utf-8")
+
+
+try:
+    raise AlignmentMismatchError("aligned text does not match the script")
+except _IO_OR_REQUEST as exc:
+    if fault_is_io_error(exc):
+        _dump({"runtime_error": "alignment input I/O failure", "segments": []})
+        sys.exit(2)
+    _dump({"runtime_error": None, "segments": [
+        {"segment_id": "bad", "status": "alignment_failed", "reason": str(exc)}]})
+    sys.exit(0)
+except _ISOLATABLE as exc:
+    _dump({"runtime_error": None, "segments": [
+        {"segment_id": "bad", "status": "alignment_failed", "reason": str(exc)}]})
+    sys.exit(0)
+except AlignmentRuntimeError as exc:
+    _dump({"runtime_error": str(exc), "segments": []})
+    sys.exit(2)
+sys.exit(0)
+"""
+    result = _run_model_stage(
+        sys.executable, fake_stage, ("model", {"segments": []})
+    )
+    assert result["runtime_error"] is None
+    assert result["segments"] == [
+        {"segment_id": "bad", "status": "alignment_failed",
+         "reason": "aligned text does not match the script"}
+    ]
+
+
 # --- helpers ---------------------------------------------------------------
 
 
@@ -981,17 +1135,23 @@ def test_caption_unclassified_exception_stops_the_run(tmp_path, monkeypatch):
     assert not (run / "final" / ".complete").exists()
 
 
-def test_postprocess_failure_is_isolated_and_others_continue(tmp_path):
-    """A deterministic postprocess failure records the segment and continues."""
+def test_postprocess_deterministic_validation_failure_is_isolated(tmp_path):
+    """A deterministic postprocess validation failure isolates the segment.
 
-    def partial_align_task(task: dict) -> dict:
+    An empty alignment is a deterministic validation failure (``compute_trim``
+    raises ``AudioPostprocessError`` because there are no tokens to trim), so
+    the segment is recorded as ``postprocess_failed`` and the others continue.
+    """
+
+    def empty_align_task(task: dict) -> dict:
         seg_dir = Path(task["run_dir"]) / "segments"
         results = []
         for seg in task["segments"]:
             raw = seg_dir / (seg["safe_name"] + ".alignment.raw.json")
             if seg["id"] == "bad":
-                # No alignment written for this segment: postprocess reads a
-                # missing file and raises AudioPostprocessError (deterministic).
+                # Valid JSON array, but no tokens -> postprocess validation
+                # failure (not an I/O fault).
+                raw.write_text("[]\n", encoding="utf-8")
                 results.append({"segment_id": seg["id"], "status": "ok"})
             else:
                 _, rate, frames = read_wav(seg_dir / (seg["safe_name"] + ".wav"))
@@ -1010,13 +1170,56 @@ def test_postprocess_failure_is_isolated_and_others_continue(tmp_path):
         alignment_model="/m",
         max_segment_chars=100,
         _wav_task=FakeTTSEngine(durations={"good": 1.0, "bad": 1.0}),
-        _align_task=partial_align_task,
+        _align_task=empty_align_task,
     )
     assert result.status == STATUS_INCOMPLETE
     by_id = {s.segment_id: s.status for s in result.segments}
     assert by_id["good"] == "ok"
     assert by_id["bad"] == "postprocess_failed"
     assert not (run / "final").exists()
+
+
+def test_postprocess_missing_alignment_io_stops_the_run(tmp_path):
+    """A missing alignment file is a filesystem I/O fault: the run stops.
+
+    Reading the missing alignment raises ``OSError`` (not wrapped into
+    ``AudioPostprocessError``), so it must not be isolated as a segment
+    failure; it must stop the whole run (C5).
+    """
+
+    def missing_align_task(task: dict) -> dict:
+        seg_dir = Path(task["run_dir"]) / "segments"
+        results = []
+        for seg in task["segments"]:
+            raw = seg_dir / (seg["safe_name"] + ".alignment.raw.json")
+            if seg["id"] == "bad":
+                # Deliberately do NOT write the alignment file: postprocess
+                # opening it raises OSError (I/O), which stops the run.
+                results.append({"segment_id": seg["id"], "status": "ok"})
+            else:
+                _, rate, frames = read_wav(seg_dir / (seg["safe_name"] + ".wav"))
+                _write_alignment(raw, seg["text"], frames / rate)
+                results.append({"segment_id": seg["id"], "status": "ok"})
+        return {"runtime_error": None, "segments": results}
+
+    script = _write_script(tmp_path, [_seg("good", "好段。"), _seg("bad", "坏段。")])
+    run = tmp_path / "run"
+    with pytest.raises(RenderError) as excinfo:
+        render_speech(
+            script,
+            run,
+            tts_python="python",
+            alignment_python="python",
+            tts_model="/m",
+            alignment_model="/m",
+            max_segment_chars=100,
+            _wav_task=FakeTTSEngine(durations={"good": 1.0, "bad": 1.0}),
+            _align_task=missing_align_task,
+        )
+    assert excinfo.value.run_dir == run
+    report = json.loads((run / "report.json").read_text(encoding="utf-8"))
+    assert report["status"] == STATUS_FAILED
+    assert not (run / "final" / ".complete").exists()
 
 
 # --- C6: publication / completion-transaction failure injection -------------
@@ -1365,19 +1568,25 @@ def _parse_srt(text: str) -> list[tuple[str, str, str]]:
 def test_global_captions_srt_use_integer_frame_offsets(tmp_path):
     """The final SRT caption times derive from integer-frame offsets (C7).
 
-    Enough unequal short segments are used so that ``O_i / R`` is generally not
-    a whole number of milliseconds; the expected caption stream is rebuilt from
-    the integer ``start_frame`` offsets and compared to the real SRT. An
-    implementation that accumulated rounded-millisecond segment durations would
-    produce different SRT timestamps and fail this test.
+    Segment lengths are deliberately non-integer-millisecond on the frame grid
+    (``start_frame`` is a multiple of one frame = 1/24 ms, so ``start_frame``
+    is only a whole millisecond when it is a multiple of 24). The expected
+    caption stream is rebuilt from the exact integer-frame offsets; a wrong
+    implementation that rounds each segment's offset to whole milliseconds and
+    then accumulates would drift and produce different SRT timestamps. The
+    negative assertion pins the test as discriminating so the distinction cannot
+    silently regress to whole-ms data again.
     """
-
-    from decimal import ROUND_HALF_UP, Decimal
 
     from media_pipeline.captions import build_captions, format_timestamp, load_alignment
 
-    n_segments = 12
-    durations = {f"s{i}": 0.3 + i * 0.03 for i in range(n_segments)}
+    n_segments = 8
+    # Durations chosen so cumulative ``start_frame`` is not a multiple of 24
+    # (i.e. not a whole millisecond on the 24 kHz grid) for several segments.
+    durations = {
+        "s0": 0.2922, "s1": 0.3252, "s2": 0.3392, "s3": 0.3197,
+        "s4": 0.3097, "s5": 0.2985, "s6": 0.3151, "s7": 0.3391,
+    }
     script = _write_script(
         tmp_path,
         [_seg(f"s{i}", f"第{i}段。") for i in range(n_segments)],
@@ -1398,21 +1607,31 @@ def test_global_captions_srt_use_integer_frame_offsets(tmp_path):
     request = json.loads((run / "request.json").read_text(encoding="utf-8"))
     original_text = {seg["id"]: seg["text"] for seg in request["segments"]}
 
-    # Independently rebuild the expected global caption stream from integer frames.
-    expected = []
-    for entry in timeline["segments"]:
-        offset = entry["start_frame"] / SAMPLE_RATE
-        tokens = load_alignment(
-            run / "segments" / (_safe_name(entry["segment_id"]) + ".alignment.adjusted.json")
-        )
-        for caption in build_captions(original_text[entry["segment_id"]], tokens):
-            expected.append(
-                (
-                    format_timestamp(caption.start + offset),
-                    format_timestamp(caption.end + offset),
-                    caption.text,
-                )
+    def caption_stream(offset_for):
+        stream = []
+        for entry in timeline["segments"]:
+            offset = offset_for(entry)
+            tokens = load_alignment(
+                run / "segments" / (_safe_name(entry["segment_id"]) + ".alignment.adjusted.json")
             )
+            for caption in build_captions(original_text[entry["segment_id"]], tokens):
+                stream.append(
+                    (
+                        format_timestamp(caption.start + offset),
+                        format_timestamp(caption.end + offset),
+                        caption.text,
+                    )
+                )
+        return stream
+
+    # Correct: the exact integer-frame offset for each segment (sub-ms fraction
+    # kept until the final SRT rounding).
+    expected = caption_stream(lambda entry: entry["start_frame"] / SAMPLE_RATE)
+
+    # Wrong (round-ms-per-segment-then-accumulate): round every segment offset
+    # to whole milliseconds before composing the stream.
+    wrong = caption_stream(lambda entry: round(entry["start_frame"] / SAMPLE_RATE * 1000) / 1000)
+    assert wrong != expected, "test data falls on whole-ms offsets; choose non-integer ones"
 
     parsed = _parse_srt((run / "final" / "final.srt").read_text(encoding="utf-8"))
     assert parsed == expected

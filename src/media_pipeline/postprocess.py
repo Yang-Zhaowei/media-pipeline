@@ -299,7 +299,12 @@ def read_wav(path: str | Path) -> tuple[list[int], int, int]:
             framerate = handle.getframerate()
             nframes = handle.getnframes()
             raw = handle.readframes(nframes)
-    except (OSError, wave.Error) as exc:
+    except OSError as exc:
+        # A missing, unreadable, or otherwise inaccessible WAV is a filesystem
+        # (I/O) fault. Propagate it so callers can treat it as a run-level stop
+        # instead of conflating it with a format validation failure.
+        raise
+    except wave.Error as exc:
         raise AudioPostprocessError(f"cannot read WAV {path}: {exc}") from exc
 
     if nchannels != 1 or sampwidth != 2:
@@ -355,8 +360,12 @@ def postprocess_speech(
         raise AudioPostprocessError(
             f"{alignment_path} is not valid JSON: {exc}"
         ) from exc
+    # An OSError here (missing/unreadable alignment file) is a filesystem I/O
+    # fault. It is intentionally not wrapped into AudioPostprocessError so the
+    # caller can stop the run rather than treat it as an isolatable
+    # per-segment validation failure.
     except OSError as exc:
-        raise AudioPostprocessError(f"cannot read alignment {alignment_path}: {exc}") from exc
+        raise
 
     try:
         tokens = parse_alignment(raw_alignment)

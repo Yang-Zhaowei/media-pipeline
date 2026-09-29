@@ -51,6 +51,7 @@ __all__ = [
     "AlignmentRequest",
     "AlignmentRequestError",
     "AlignmentRuntimeError",
+    "fault_is_io_error",
     "validate_alignment",
     "validate_request",
     "validate_wav",
@@ -108,6 +109,25 @@ class AlignmentArtifact:
         """Total input-WAV duration in seconds (derived from ``frames``)."""
 
         return self.frames / self.sample_rate
+
+
+def fault_is_io_error(exc: BaseException) -> bool:
+    """True if ``exc`` (or its ``__cause__`` chain) originates from an ``OSError``.
+
+    ``AlignmentRequestError`` is raised both for a genuinely malformed request
+    and for an unreadable/missing input WAV, the latter wrapping a filesystem
+    ``OSError``. A run-level I/O or runtime fault must stop the whole run, while
+    only an explicit per-segment deterministic validation failure may be
+    isolated; this helper draws that line so a single exception type is not
+    mis-classified as isolatable.
+    """
+
+    cause = exc.__cause__
+    while cause is not None:
+        if isinstance(cause, OSError):
+            return True
+        cause = cause.__cause__
+    return False
 
 
 def validate_request(request: AlignmentRequest) -> None:
