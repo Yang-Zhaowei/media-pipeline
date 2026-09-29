@@ -28,6 +28,24 @@ inherently a two-process sequence.
 - the production models reachable by their environment-configured paths
   (never hard-coded).
 
+### Exact-head prerequisite (mandatory before an ai-core run)
+
+The audit records a commit SHA, so the run must reflect exactly that commit.
+Before running the driver, confirm the working tree is clean:
+
+```bash
+git rev-parse HEAD
+git status --porcelain
+```
+
+The driver itself checks this too and **fails** (never skips) if `git` errors or
+the tree is dirty -- commit or stash pending changes first, so the reported HEAD
+is the code under test. This makes the recorded SHA the actual code run; `rev-parse`
+alone is not enough, since a dirty tree would change the imported code.
+
+The driver does not reimplement a Git abstraction; it only runs `git rev-parse`
+and `git status --porcelain` against the repository root.
+
 ## Configuration (environment variables)
 
 | Variable | Meaning |
@@ -79,12 +97,17 @@ overwriting a previous run.
 
 ## Required properties validated (`validate_e2e`)
 
-- The trimmed WAV is unchanged except for the quantized trim window
-  (`frame_rate` / `sample_rate` / `channels` / byte content outside the window).
-- Every token keeps its duration and relative order; every gap is preserved;
-  each timestamp shifts by exactly the quantized trim offset.
-- Alignment integrity: no duplicate tokens, no overlap, no gaps, no blank
-  records, and no token running past the trimmed WAV.
+- The raw input WAV remains byte-identical; the produced `final.wav` keeps the
+  `frame_rate`, total frame count, and channel layout of the input, and equals
+  the integer-frame quantized kept window. Short fades are applied at the two
+  new edges of that kept window, so the kept window's samples are intentionally
+  not byte-identical to the raw input. The adjusted timestamps use the actual
+  quantized front trim offset; the production audio processing itself follows
+  the existing `postprocess_speech` contract.
+- Every token keeps its duration and relative order; legitimate gaps are
+  preserved; each timestamp shifts by exactly the signed quantized trim offset.
+- Alignment integrity: no duplicate tokens, no real overlap (touching is
+  allowed), no blank records, and no token running past the trimmed WAV.
 - Caption and SRT integrity: the SRT text equals the reviewed original text,
   the caption count matches the caption compiler, and every caption timestamp
   is non-empty and inside the final WAV.

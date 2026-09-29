@@ -395,3 +395,61 @@ def test_snapshot_helper_detects_bytes_change(tmp_path: Path) -> None:
 
     with pytest.raises(E2EAssertionError):
         assert_wav_unchanged(snap, wav)
+
+
+# --- SRT document validation: the whole document, not just embedded blocks ---
+
+
+def test_read_srt_rejects_garbage_prefix() -> None:
+    # A valid block must not be accepted when garbage precedes it: the validator
+    # must prove the *entire* document is the production SRT structure.
+    from e2e_validation import CaptionError, read_srt
+
+    with pytest.raises(CaptionError):
+        read_srt("garbage\n\n1\n00:00:00,100 --> 00:00:01,000\ncaption\n")
+
+
+def test_read_srt_rejects_garbage_trailing() -> None:
+    # Trailing content after the last block must also be rejected.
+    from e2e_validation import CaptionError, read_srt
+
+    with pytest.raises(CaptionError):
+        read_srt("1\n00:00:00,100 --> 00:00:01,000\ncaption\n\nGARBAGE\n")
+
+
+def test_read_srt_keeps_payload_whitespace_verbatim() -> None:
+    # The SRT payload is not .strip()ed, so extra leading/trailing whitespace on
+    # the caption line is preserved (and therefore rejected by an exact text
+    # comparison downstream), instead of being silently normalized away.
+    from e2e_validation import read_srt
+
+    trailing = read_srt("1\n00:00:00,100 --> 00:00:01,000\ncaption \n")
+    assert trailing[0]["text"] == "caption "
+    assert trailing[0]["text"] != "caption"
+
+    leading = read_srt("1\n00:00:00,100 --> 00:00:01,000\n caption\n")
+    assert leading[0]["text"] == " caption"
+    assert leading[0]["text"] != "caption"
+
+
+def test_emitted_srt_timestamp_past_final_wav_is_rejected() -> None:
+    # A caption.end that is within the final WAV (float check passes) can still
+    # round UP (ROUND_HALF_UP) to an emitted millisecond timestamp past the WAV.
+    # The timing check must use the *emitted* timestamp, not the float caption.end.
+    from media_pipeline.captions import Caption
+
+    from e2e_validation import E2EArtifacts, _srt_timing_consistent_with_final_wav
+
+    final_duration = 1.2346  # frames / rate
+    artifacts = E2EArtifacts(
+        run_dir=None,
+        text="caption",
+        final_wav_sample_rate=10_000,
+        final_wav_frames=int(round(final_duration * 10_000)),
+        captions=[Caption(start=1.0, end=1.2346, text="caption")],
+        # caption.end == final_duration (float check passes), but the emitted
+        # millisecond end rounds UP to 1.235, which is past the WAV.
+        srt_text="1\n00:00:01,000 --> 00:00:01,235\ncaption\n",
+    )
+    with pytest.raises(E2EAssertionError):
+        _srt_timing_consistent_with_final_wav(artifacts)

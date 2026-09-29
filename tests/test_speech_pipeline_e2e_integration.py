@@ -169,7 +169,8 @@ import json
 import sys
 from pathlib import Path
 
-from media_pipeline.alignment import AlignmentRequest, validate_wav, load_alignment
+from media_pipeline.alignment import AlignmentRequest, validate_wav
+from media_pipeline.captions import load_alignment
 from media_pipeline.runtimes.qwen_aligner import Qwen3ForcedAlignment
 
 model_path, out_align, wav, request = sys.argv[1], sys.argv[2], sys.argv[3], json.loads(sys.argv[4])
@@ -279,30 +280,35 @@ def test_alignment_env_alias_resolution(monkeypatch: pytest.MonkeyPatch) -> None
     assert _any_alias("MEDIA_ALIGNMENT_PYTHON", "MEDIA_PIPELINE_ALIGNMENT_PYTHON") is None
 
 
-def test_embedded_align_stage_import_target_exists() -> None:
-    # The embedded Alignment stage imports ``load_alignment`` from
-    # ``media_pipeline.captions`` (its real home), never from
-    # ``media_pipeline.alignment`` -- an import from the wrong module raises
-    # ImportError and would abort a configured real GPU E2E before Alignment.
-    import contextlib
-    import io
-    import py_compile
+def test_embedded_align_stage_imports_load_alignment_from_captions() -> None:
+    # The embedded Alignment stage must import ``load_alignment`` from its real
+    # home, :mod:`media_pipeline.captions`, never from :mod:`media_pipeline.alignment`
+    # (which does not define it). An import from the wrong module raises
+    # ImportError and aborts a configured real GPU E2E before Alignment runs.
+    #
+    # This inspects the *actual embedded source* through the AST, so it catches
+    # a wrong import target on CPU -- without executing the imports, loading a
+    # model, or needing CUDA -- and a regression would fail here on every run.
+    import ast
 
     import media_pipeline.alignment as align_mod
 
     assert not hasattr(align_mod, "load_alignment")
-    from media_pipeline.captions import load_alignment  # noqa: F401  (real target)
 
-    # The embedded stage script compiles cleanly under the CPU interpreter.
-    script = _REPO_ROOT / "tests" / "_align_stage_compile.py"
-    script.write_text(_ALIGN_STAGE, encoding="utf-8")
-    try:
-        with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(
-            io.StringIO()
-        ):
-            py_compile.compile(str(script), doraise=True)
-    finally:
-        script.unlink(missing_ok=True)
+    tree = ast.parse(_ALIGN_STAGE)
+    captured: list[tuple[str, str]] = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom):
+            for alias in node.names:
+                if alias.name == "load_alignment":
+                    captured.append((node.module or "", alias.name))
+
+    assert captured, "embedded _ALIGN_STAGE does not import load_alignment"
+    for module, _name in captured:
+        assert module == "media_pipeline.captions", (
+            f"load_alignment imported from wrong module {module!r}; "
+            "it is defined in media_pipeline.captions, not media_pipeline.alignment"
+        )
 
 
 def test_standalone_driver_starts_from_repo_root_and_gates_on_env() -> None:

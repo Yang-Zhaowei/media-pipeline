@@ -126,8 +126,10 @@ Human listening and SRT sync inspection are required, never optional.
 ## Next
 
 The end-to-end validation harness for the full production Speech Pipeline v0
-is complete on PC_Client (all production stages merged; suite green). Milestone
-closure now depends only on the real ai-core validation.
+is complete on PC_Client (all production stages merged; suite green). The
+automated step of closure -- an exact-head real ai-core E2E PASS -- is ready to
+run on ai-core; the human steps (listening + SRT sync inspection + acceptance)
+are not automated and must still be completed.
 
 Run the two-process E2E once, on ai-core, using the TTS and Alignment
 environments (see `validation/README.md`):

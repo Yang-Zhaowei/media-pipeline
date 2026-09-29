@@ -43,6 +43,7 @@ from media_pipeline.captions import (
     DEFAULT_PAUSE_THRESHOLD,
     AlignedToken,
     Caption,
+    CaptionError,
     build_captions,
     compile_srt,
     format_timestamp,
@@ -610,7 +611,15 @@ def _srt_valid_and_ordered(artifacts: E2EArtifacts) -> None:
 
 
 def _srt_timing_consistent_with_final_wav(artifacts: E2EArtifacts) -> None:
-    """SRT timing is consistent with adjusted boundaries and final WAV duration."""
+    """The *emitted* SRT millisecond timestamps fall inside the final WAV.
+
+    The check uses the actual millisecond timestamps parsed out of the produced
+    SRT document, not the float ``caption.end``: ``ROUND_HALF_UP`` rendering can
+    push an emitted timestamp past the float boundary (for example
+    ``caption.end = 1.2346`` -> SRT ``1.235``), so a float-only check could
+    accept an SRT whose emitted end exceeds the final WAV. Touching the very end
+    of the WAV is allowed, since the last caption has no following block.
+    """
 
     captions = artifacts.captions
     if captions is None:
@@ -619,12 +628,20 @@ def _srt_timing_consistent_with_final_wav(artifacts: E2EArtifacts) -> None:
         raise E2EAssertionError("final WAV duration is unknown")
     final_duration = artifacts.final_wav_frames / artifacts.final_wav_sample_rate
 
-    for index, caption in enumerate(captions):
-        if caption.start < 0 or caption.end < 0:
-            raise E2EAssertionError(f"caption {index} has negative timing")
-        if caption.end > final_duration + _TIMING_TOL:
+    blocks = read_srt(artifacts.srt_text)
+    for index, (block, caption) in enumerate(zip(blocks, captions)):
+        if block["start"] < 0 or block["end"] < 0:
+            raise E2EAssertionError(f"SRT block {index} has negative timing")
+        # The *emitted* millisecond end (not the float caption.end) must fall
+        # inside the final WAV; touching the end is allowed.
+        if block["end"] > final_duration + _TIMING_TOL:
             raise E2EAssertionError(
-                f"caption {index} ends at {caption.end}, past the final WAV "
+                f"SRT block {index} ends at {block['end']}, past the final WAV "
+                f"duration {final_duration}"
+            )
+        if block["start"] > final_duration + _TIMING_TOL:
+            raise E2EAssertionError(
+                f"SRT block {index} starts at {block['start']}, past the final WAV "
                 f"duration {final_duration}"
             )
 
@@ -647,20 +664,31 @@ def _srt_timestamp_ms(seconds: float) -> str:
 
 
 _SRT_BLOCK = re.compile(
-    r"(?P<index>\d+)\s*\n\s*"
+    r"(?P<index>\d+)\s*\n"
     r"(?P<start>\d{2}:\d{2}:\d{2},\d{3})\s*-->\s*"
     r"(?P<end>\d{2}:\d{2}:\d{2},\d{3})\s*\n"
-    r"(?P<text>.*?)(?=\n\d+\s*\n|\Z)",
-    re.DOTALL,
+    r"(?P<text>[^\n]*)"   # the whole caption payload line, captured raw
+    r"\n\n?"              # text-line terminator + optional blank-line separator
+    r"(?=\d+\s*\n|\Z)",  # next block index, or the end of the document
 )
 
 
 def read_srt(document: str) -> list[dict]:
-    """Parse an SRT document into blocks with index/start/end/strings/text.
+    """Parse a production SRT document into blocks.
 
-    Timestamps are parsed both back to seconds (so timing can be checked against
-    the WAV) and kept as their original ``HH:MM:SS,mmm`` string (so the raw
-    millisecond rendering can be checked against the production rounding).
+    Each block carries ``index``/``start``/``end`` (timestamps parsed both back
+    to seconds, for timing checks against the WAV, and kept as their original
+    ``HH:MM:SS,mmm`` string, for checking the production rounding) and ``text``.
+
+    The whole document is enforced to conform: the first block must start at the
+    beginning (rejecting a garbage prefix), consecutive blocks must be exactly
+    contiguous (rejecting content between them), and the last block must reach
+    the end (rejecting trailing garbage). This proves the *entire* document is
+    the production SRT structure, not merely that some valid blocks appear in it.
+
+    The caption ``text`` is returned *verbatim* -- it is never ``.strip()``-ed,
+    so any leading/trailing whitespace the renderer emits on the payload line is
+    preserved and can be rejected by an exact comparison downstream.
     """
 
     def to_seconds(value: str) -> float:
@@ -668,8 +696,19 @@ def read_srt(document: str) -> list[dict]:
         hours, minutes, secs = (int(part) for part in time_part.split(":"))
         return hours * 3600 + minutes * 60 + secs + int(millis) / 1000.0
 
+    matches = list(_SRT_BLOCK.finditer(document))
+    if not matches:
+        raise CaptionError(f"SRT document has no valid block: {document!r}")
+    if matches[0].start() != 0:
+        raise CaptionError("SRT document has content before the first block")
+    for previous, match in zip(matches[:-1], matches[1:]):
+        if match.start() != previous.end():
+            raise CaptionError("SRT document has content between blocks")
+    if matches[-1].end() != len(document):
+        raise CaptionError("SRT document has trailing content after the last block")
+
     blocks: list[dict] = []
-    for match in _SRT_BLOCK.finditer(document):
+    for match in matches:
         blocks.append(
             {
                 "index": int(match.group("index")),
@@ -677,7 +716,7 @@ def read_srt(document: str) -> list[dict]:
                 "end": to_seconds(match.group("end")),
                 "start_str": match.group("start"),
                 "end_str": match.group("end"),
-                "text": match.group("text").strip(),
+                "text": match.group("text"),
             }
         )
     return blocks

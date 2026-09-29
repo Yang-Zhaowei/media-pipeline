@@ -186,19 +186,50 @@ def main(argv: list[str] | None = None) -> int:
         _REPO_ROOT / "tests" / "fixtures" / "speech-smoke-001" / "original.txt"
     ).read_text(encoding="utf-8")
 
-    config = {
-        "commit": subprocess.run(
-            ["git", "rev-parse", "HEAD"],
-            capture_output=True,
-            text=True,
-            cwd=str(_REPO_ROOT),
-        ).stdout.strip(),
-    }
-
     tts_python = _require("MEDIA_PIPELINE_TTS_PYTHON")
     align_python = _require_alias("MEDIA_ALIGNMENT_PYTHON", "MEDIA_PIPELINE_ALIGNMENT_PYTHON")
     tts_model = _require("MEDIA_PIPELINE_TTS_MODEL")
     align_model = _require_alias("MEDIA_ALIGNMENT_MODEL", "MEDIA_PIPELINE_ALIGNMENT_MODEL")
+
+    # Exact-head guard: run *after* environment-gating so a run that never
+    # configured the GPU stages still fails on the documented missing-variable
+    # reason, and right before any real stage runs, so the recorded commit is
+    # the code actually exercised.
+    head = subprocess.run(
+        ["git", "rev-parse", "HEAD"],
+        capture_output=True,
+        text=True,
+        cwd=str(_REPO_ROOT),
+    )
+    if head.returncode != 0:
+        # A git failure means the exact HEAD cannot be established: this is not
+        # a skip-able condition for an exact-head validation, so it FAILs.
+        raise SystemExit(
+            "git failed; exact-head validation cannot proceed:\n"
+            f"stderr: {head.stderr.strip()}"
+        )
+    commit = head.stdout.strip()
+    status = subprocess.run(
+        ["git", "status", "--porcelain"],
+        capture_output=True,
+        text=True,
+        cwd=str(_REPO_ROOT),
+    )
+    if status.returncode != 0:
+        raise SystemExit(
+            "git status failed; exact-head validation cannot proceed:\n"
+            f"stderr: {status.stderr.strip()}"
+        )
+    if status.stdout.strip():
+        # A dirty tree means the code actually run is not the checked-out HEAD,
+        # so the reported commit is not the code under test. Fail loudly and
+        # tell the operator to make the tree clean first.
+        raise SystemExit(
+            "working tree is not clean; the exact HEAD is not the code under test. "
+            "Commit or stash pending changes and re-run exact-head validation."
+        )
+
+    config = {"commit": commit}
 
     # --- Process 1: Production TTS -> raw.wav --------------------------------
     synth_script = run_dir / "e2e_synthesize.py"
