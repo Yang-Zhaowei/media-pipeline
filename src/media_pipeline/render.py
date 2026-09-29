@@ -32,6 +32,7 @@ from __future__ import annotations
 import hashlib
 import json
 import math
+import os
 import re
 import subprocess
 from dataclasses import dataclass, field
@@ -46,6 +47,7 @@ from .alignment import (
 )
 from .captions import (
     Caption,
+    CaptionError,
     build_captions,
     load_alignment,
     render_srt,
@@ -82,6 +84,13 @@ _TIMING_TOLERANCE = 1e-6
 #: purely through ``ROUND_HALF_UP`` quantization. Used only for the audio
 #: boundary check, never to tolerate accumulated drift.
 _SRT_MS_TOLERANCE = 0.5
+
+# Absolute path to this repository's ``src/`` directory, resolved portably from
+# the location of this module. The embedded model stages run in their own
+# interpreters; importing ``media_pipeline`` from here (rather than depending on
+# a venv's installed copy) guarantees the subprocess runs the current checkout
+# of the production code -- see contract C4/C8.
+_SRC = Path(__file__).resolve().parent.parent
 
 # The public callable signature: ``task_dict -> results_dict`` (one model stage,
 # one model load, all segments in a single session). Kept as an optional internal
@@ -366,8 +375,15 @@ class _RunReport:
     artifacts: dict
 
 
-def _write_report(run_dir: Path, report: _RunReport) -> None:
-    """Best-effort report write; a disk failure never fabricates success."""
+def _write_report(run_dir: Path, report: _RunReport, *, strict: bool = False) -> None:
+    """Write ``report.json``.
+
+    By default the write is best-effort: on an unwritable disk the failure is
+    swallowed so a report failure never fabricates success and never masks the
+    original run-level exception (C6). On the success path ``strict`` is set:
+    a report write failure must not be silently ignored, because the completion
+    marker is written only after this call returns successfully.
+    """
 
     payload = {
         "status": report.status,
@@ -383,9 +399,11 @@ def _write_report(run_dir: Path, report: _RunReport) -> None:
             encoding="utf-8",
         )
     except OSError:
-        # The disk may be unwritable; surface nothing false. The original
-        # run-level exception is what the caller sees.
-        pass
+        if strict:
+            raise
+        # Best-effort: the disk may be unwritable; surface nothing false. The
+        # original run-level exception is what the caller sees.
+        return
 
 
 def report_segment(
@@ -527,12 +545,12 @@ def render_speech(
 
     try:
         # --- TTS: one load, synthesize every segment, then exit -------------
-        _run_tts_stage(run_dir, script, safe_names, segments, wav_task, report)
+        _run_tts_stage(run_dir, script, safe_names, segments, wav_task, report, device)
         report.completed_stages.append("tts")
 
         # --- Alignment: one load, align every segment independently ---------
         failed_alignment = _run_alignment_stage(
-            run_dir, script, safe_names, segments, align_task, report
+            run_dir, script, safe_names, segments, align_task, report, device
         )
 
         # --- Postprocess + captions per segment (pure, CPU) -----------------
@@ -543,13 +561,20 @@ def render_speech(
         report.completed_stages.append("captions")
 
         # --- Assemble whole episode + verify final products -----------------
-        result = _assemble_and_publish(
-            run_dir, script, safe_names, cleaned, report
-        )
-        report.completed_stages.append("assemble")
+        # This performs the full completion transaction: it writes the
+        # ``complete`` report successfully and then the ``.complete`` marker
+        # last, or returns an ``incomplete`` result, or raises a run-level
+        # ``RenderError`` (with ``run_dir``) on any final-verification fault.
+        return _assemble_and_publish(run_dir, script, safe_names, cleaned, report)
+    except RenderError as exc:  # noqa: PERF203 - teardown then re-raise
+        # An explicit run-level fault (TTS synthesis failure, sample-rate
+        # mismatch, final-verification failure, ...) must not leave the report
+        # as ``running``; record the failure best-effort and keep the partial
+        # artifacts recoverable via ``run_dir`` (C6).
+        report.status = STATUS_FAILED
         _write_report(run_dir, report)
-        return result
-    except RenderError:
+        if exc.run_dir is None:
+            exc.run_dir = run_dir
         raise
     except Exception as exc:  # noqa: BLE001 - run-level, keep partial results
         report.status = STATUS_FAILED
@@ -567,6 +592,7 @@ def _run_tts_stage(
     segments: list[dict],
     wav_task: TaskCallable,
     report: _RunReport,
+    device: str,
 ) -> None:
     """Run the TTS stage: one subprocess loads the model once and synthesizes all segments.
 
@@ -579,6 +605,7 @@ def _run_tts_stage(
         "language": script.language,
         "speaker": script.speaker,
         "instruct": script.instruct,
+        "device": device,
         "segments": [
             {"id": seg["id"], "safe_name": safe_names[seg["id"]], "text": seg["text"]}
             for seg in segments
@@ -642,6 +669,7 @@ def _run_alignment_stage(
     segments: list[dict],
     align_task: TaskCallable,
     report: _RunReport,
+    device: str,
 ) -> list[str]:
     """Run the Alignment stage: one subprocess loads the model once and aligns all segments.
 
@@ -654,6 +682,7 @@ def _run_alignment_stage(
     task = {
         "run_dir": str(run_dir),
         "language": script.language,
+        "device": device,
         "segments": [
             {"id": seg["id"], "safe_name": safe_names[seg["id"]], "text": seg["text"]}
             for seg in segments
@@ -751,7 +780,11 @@ def _run_postprocess_stage(
                 fade_in=DEFAULT_FADE_IN,
                 fade_out=DEFAULT_FADE_OUT,
             )
-        except (AudioPostprocessError, OSError) as exc:
+        except AudioPostprocessError as exc:
+            # A deterministic validation failure (malformed WAV, stale or
+            # untrimmable alignment) is the only isolatable per-segment fault in
+            # this stage; disk I/O (OSError) is a run-level fault and must stop
+            # the run (C5), so it is deliberately not caught here.
             report_segment(
                 report,
                 segment_id,
@@ -764,7 +797,12 @@ def _run_postprocess_stage(
         try:
             tokens = load_alignment(adjusted_alignment)
             local_captions = build_captions(seg["text"], tokens)
-        except Exception as exc:  # noqa: BLE001 - deterministic caption failure
+        except CaptionError as exc:
+            # Only the deterministic caption/alignment semantic validation
+            # exceptions (``AlignmentError`` / ``AlignmentMismatchError``) are
+            # isolatable per-segment faults. Any other error (for example an
+            # I/O failure) is a run-level fault and must stop the run (C5), so
+            # it is deliberately not caught here.
             report_segment(
                 report,
                 segment_id,
@@ -882,6 +920,14 @@ def _assemble_and_publish(
     # --- verify the caption timeline before writing anything ----------------
     _verify_caption_timeline(global_captions, total_frames, common_rate, run_dir)
 
+    # --- verify the integer-frame timeline integrity (C7) -------------------
+    _verify_timeline_integrity(
+        timeline_segments,
+        [seg.segment_id for seg in cleaned],
+        total_frames,
+        run_dir,
+    )
+
     # --- render SRT (only at the very end, existing half-up rules) ----------
     srt_text = render_srt(global_captions)
 
@@ -910,22 +956,39 @@ def _assemble_and_publish(
         encoding="utf-8",
     )
 
-    _verify_final_products(staging, common_rate, total_frames, global_captions)
+    _verify_final_products(
+        staging,
+        common_rate,
+        total_frames,
+        global_captions,
+        [seg.segment_id for seg in cleaned],
+    )
 
-    # --- publish final/ and write the completion marker last ----------------
+    # --- publish final/ products, then complete the run transaction (C6) ---
+    # Order is a transaction: publish the artifacts, write the ``complete``
+    # report successfully, and only then write the ``.complete`` marker last.
+    # A failure at any step leaves no ``.complete`` marker, so a consumer never
+    # treats a failed publish/report/marker write as success.
     final_dir = run_dir / "final"
     final_dir.mkdir(parents=True, exist_ok=True)
     _publish(final_wav, final_dir / "final.wav")
     _publish(final_srt, final_dir / "final.srt")
     _publish(final_timeline, final_dir / "timeline.json")
-    (final_dir / ".complete").write_text("complete", encoding="utf-8")
 
     report.status = STATUS_COMPLETE
+    report.completed_stages.append("assemble")
     report.artifacts = {
         "wav_path": "final/final.wav",
         "srt_path": "final/final.srt",
         "timeline_path": "final/timeline.json",
     }
+
+    # The report must be written successfully before the completion marker; on
+    # the success path a report write failure is raised, never swallowed.
+    _write_report(run_dir, report, strict=True)
+
+    # The completion marker is the very last step: nothing writes after it.
+    (final_dir / ".complete").write_text("complete", encoding="utf-8")
 
     return RenderResult(
         status=STATUS_COMPLETE,
@@ -970,22 +1033,22 @@ def _verify_caption_timeline(
     """
 
     if not captions:
-        raise RenderError("assembly produced no captions", run_dir=None)
+        raise RenderError("assembly produced no captions", run_dir=run_dir)
 
     final_duration = total_frames / sample_rate
     previous_end = -1.0
     for index, caption in enumerate(captions):
         if not caption.text:
             raise RenderError(
-                f"caption {index + 1} has empty text after assembly", run_dir=None
+                f"caption {index + 1} has empty text after assembly", run_dir=run_dir
             )
         if caption.start < 0 or caption.end < 0:
             raise RenderError(
-                f"caption {index + 1} has negative timing", run_dir=None
+                f"caption {index + 1} has negative timing", run_dir=run_dir
             )
         if not (caption.start < caption.end):
             raise RenderError(
-                f"caption {index + 1} has start >= end", run_dir=None
+                f"caption {index + 1} has start >= end", run_dir=run_dir
             )
         # Zero duration from millisecond quantization is an explicit failure.
         start_ms = _caption_ms(caption.start)
@@ -994,11 +1057,11 @@ def _verify_caption_timeline(
             raise RenderError(
                 f"caption {index + 1} has zero or negative duration after "
                 f"millisecond quantization",
-                run_dir=None,
+                run_dir=run_dir,
             )
         if caption.start < previous_end - _TIMING_TOLERANCE:
             raise RenderError(
-                f"caption {index + 1} overlaps the previous caption", run_dir=None
+                f"caption {index + 1} overlaps the previous caption", run_dir=run_dir
             )
         previous_end = caption.end
         emitted_end_ms = end_ms
@@ -1006,8 +1069,68 @@ def _verify_caption_timeline(
             raise RenderError(
                 f"caption {index + 1} ends at {emitted_end_ms} ms, past the final "
                 f"WAV duration {final_duration * 1000} ms",
-                run_dir=None,
+                run_dir=run_dir,
             )
+
+
+def _verify_timeline_integrity(
+    timeline_segments: object,
+    segment_ids: list[str],
+    total_frames: int,
+    run_dir: Path,
+) -> None:
+    """Verify the integer-frame timeline accumulation against the source of truth (C7).
+
+    ``segment_ids`` is the ordered list of input segment ids; ``timeline_segments``
+    is the ``segments`` array from ``timeline.json``. Each entry must carry the
+    four required integer fields, appear in the input order, and have a
+    ``start_frame`` equal to the cumulative ``audio_frames + pause_after_frames``
+    of the preceding segments. The accumulated total must equal ``total_frames``.
+    """
+
+    if not isinstance(timeline_segments, list):
+        raise RenderError(
+            "timeline is missing its per-segment entries", run_dir=run_dir
+        )
+    if len(timeline_segments) != len(segment_ids):
+        raise RenderError(
+            "timeline segment count does not match the input segments",
+            run_dir=run_dir,
+        )
+    running = 0
+    for entry, expected_id in zip(timeline_segments, segment_ids):
+        for key in ("segment_id", "start_frame", "audio_frames", "pause_after_frames"):
+            if key not in entry:
+                raise RenderError(
+                    f"timeline segment entry missing {key!r}", run_dir=run_dir
+                )
+        for key in ("start_frame", "audio_frames", "pause_after_frames"):
+            # ``bool`` is an ``int`` subclass; reject it so a frame count can
+            # never be silently stored as ``True``/``False``.
+            if not isinstance(entry[key], int) or isinstance(entry[key], bool):
+                raise RenderError(
+                    f"timeline {key} must be an integer frame count",
+                    run_dir=run_dir,
+                )
+        if entry["segment_id"] != expected_id:
+            raise RenderError(
+                "timeline segment order does not match the input segments",
+                run_dir=run_dir,
+            )
+        if entry["start_frame"] != running:
+            raise RenderError(
+                f"timeline segment {expected_id!r} start_frame "
+                f"{entry['start_frame']} does not match the accumulated "
+                f"{running} (integer-frame offset)",
+                run_dir=run_dir,
+            )
+        running += entry["audio_frames"] + entry["pause_after_frames"]
+    if running != total_frames:
+        raise RenderError(
+            f"timeline total_frames {total_frames} does not match the "
+            f"accumulated {running}",
+            run_dir=run_dir,
+        )
 
 
 def _caption_ms(seconds: float) -> int:
@@ -1017,7 +1140,11 @@ def _caption_ms(seconds: float) -> int:
 
 
 def _verify_final_products(
-    final_dir: Path, sample_rate: int, total_frames: int, captions: list[Caption]
+    final_dir: Path,
+    sample_rate: int,
+    total_frames: int,
+    captions: list[Caption],
+    segment_ids: list[str],
 ) -> None:
     """Re-read the published final WAV/SRT/timeline and verify them against disk."""
 
@@ -1055,14 +1182,24 @@ def _verify_final_products(
             run_dir=final_dir.parent,
         )
     timeline_segments = timeline.get("segments")
-    if not isinstance(timeline_segments, list) or len(timeline_segments) != len(captions) == 0:
-        raise RenderError("timeline is missing its per-segment entries", run_dir=final_dir.parent)
-    for entry in timeline_segments:
-        for key in ("segment_id", "start_frame", "audio_frames", "pause_after_frames"):
-            if key not in entry:
-                raise RenderError(
-                    f"timeline segment entry missing {key!r}", run_dir=final_dir.parent
-                )
+    # Re-verify the integer-frame accumulation against the re-read file (C7).
+    _verify_timeline_integrity(
+        timeline_segments, segment_ids, total_frames, final_dir.parent
+    )
+    # Second values, if present, must be derived from the integer frames, never
+    # from independently rounded millisecond accumulations.
+    if "duration_seconds" in timeline:
+        expected_duration = total_frames / sample_rate
+        if abs(timeline["duration_seconds"] - expected_duration) > _TIMING_TOLERANCE:
+            raise RenderError(
+                "timeline duration_seconds is not derived from integer frames",
+                run_dir=final_dir.parent,
+            )
+    if "start_seconds" in timeline and timeline["start_seconds"] != 0.0:
+        raise RenderError(
+            "timeline start_seconds is not zero",
+            run_dir=final_dir.parent,
+        )
 
 
 # --- model stage subprocess construction ------------------------------------
@@ -1115,6 +1252,17 @@ def _run_model_stage(
 
     The model stage is launched exactly once per run. The stage writes the
     per-segment result manifest itself; the parent only reads it.
+
+    The child runs in an isolated interpreter environment with this checkout's
+    ``src/`` prepended to ``PYTHONPATH`` (C4/C8): it imports the current
+    production ``media_pipeline`` code regardless of whether the interpreter's
+    venv has ``media_pipeline`` installed, stale or not.
+
+    The structured manifest is read before deciding on failure (C5): the child
+    writes it and then exits non-zero even on a per-segment fault, so the
+    segment id, stage and original reason are preserved rather than replaced by
+    a generic exit-code/stderr message. The exit code + stderr are only used as
+    a fallback when no usable manifest was produced.
     """
 
     import tempfile
@@ -1129,29 +1277,53 @@ def _run_model_stage(
             json.dumps({"args": list(args), "manifest": str(manifest_file)}),
             encoding="utf-8",
         )
+        # Run the current checkout independent of the interpreter's venv state.
+        env = dict(os.environ)
+        env["PYTHONPATH"] = str(_SRC) + os.pathsep + env.get("PYTHONPATH", "")
         completed = subprocess.run(
             [interpreter, "-c", stage_script, str(task_file)],
             capture_output=True,
             text=True,
+            env=env,
         )
-        if completed.returncode != 0:
+
+        # Read the structured manifest the child wrote, regardless of exit code.
+        _load_stage_manifest(manifest_file, result_manifest)
+
+        # Only when no usable structured result was produced do we fall back to
+        # the exit code / stderr. A non-zero exit with an empty manifest is a
+        # run-level fault, never an isolatable segment failure.
+        if (
+            completed.returncode != 0
+            and not result_manifest["segments"]
+            and not result_manifest["runtime_error"]
+        ):
             result_manifest["runtime_error"] = (
                 f"stage failed (exit {completed.returncode}):\n"
                 f"stderr: {completed.stderr}"
             )
-            return result_manifest
-
-        # Read the manifest while the temp directory still exists.
-        if manifest_file.exists():
-            try:
-                loaded = json.loads(manifest_file.read_text(encoding="utf-8"))
-                if isinstance(loaded, dict):
-                    result_manifest["runtime_error"] = loaded.get("runtime_error")
-                    result_manifest["segments"] = loaded.get("segments", []) or []
-            except (OSError, json.JSONDecodeError):
-                result_manifest["runtime_error"] = "cannot parse stage result manifest"
 
     return result_manifest
+
+
+def _load_stage_manifest(manifest_file: Path, result_manifest: dict) -> None:
+    """Populate ``result_manifest`` from the child's structured manifest (C5).
+
+    Prefer any valid structured ``runtime_error`` / ``segments`` the child
+    wrote. If the manifest is missing or corrupt, record a parse error so the
+    run stops instead of silently continuing on lost information.
+    """
+
+    if not manifest_file.exists():
+        return
+    try:
+        loaded = json.loads(manifest_file.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        result_manifest["runtime_error"] = "cannot parse stage result manifest"
+        return
+    if isinstance(loaded, dict):
+        result_manifest["runtime_error"] = loaded.get("runtime_error")
+        result_manifest["segments"] = loaded.get("segments", []) or []
 
 
 # --- embedded model stage scripts -------------------------------------------

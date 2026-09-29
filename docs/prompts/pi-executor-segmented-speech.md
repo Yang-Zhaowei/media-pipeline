@@ -48,13 +48,22 @@ AGENTS.md、README.md、docs/CURRENT.md、docs/ROADMAP.md、docs/dev/core-runtim
 9. 在功能分支提交并创建可审查 PR；验收未齐时保持 draft。附真实测试结果、限制、
    逐条 C1–C9 验收映射。不要自动 merge，不发送消息给其他 chat，除非用户另行授权。
 
-## 完成后交付
+## Implement it narrowly.
 
-- PR URL、base/head SHA、改动文件概述。
-- 一个可运行的新接口示例，路径由使用者配置。
-- C1–C9 的实现和验证位置，明确未完成项。
-- CPU 与 ai-core 结果分列，人工验收单独列出。
-- 是否有范围偏离或实现阻塞；不能用“后面再说”掩盖关键契约缺失。
+Requirements:
 
+- reuse existing repository patterns;
+- do not redesign unless repository evidence proves the plan invalid;
+- do not broaden scope;
+- keep portable logic separate from runtime/model integration;
+- verify uncertain external API behavior instead of guessing;
+- add the required tests;
+- run the relevant test suite;
+- report exactly what was executed;
+- distinguish CPU/unit validation from real runtime/GPU validation;
+- do not claim integration validation unless it actually ran.
+
+If implementation must deviate materially from the plan, stop and explain
+the repository evidence that requires the deviation.
 遇到契约的实质冲突，先完成不受影响的工作并指出冲突，不能静默变更范围。
 特别禁止为了让测试通过而放宽失败语义、删除原稿内容、伪造字幕或修改回归 fixtures。

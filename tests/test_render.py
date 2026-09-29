@@ -895,3 +895,524 @@ def _half_up(value: int, rate: int) -> int:
     from decimal import ROUND_HALF_UP, Decimal
 
     return int((Decimal(str(value)) * rate / Decimal(1000)).quantize(Decimal("1"), rounding=ROUND_HALF_UP))
+
+
+# --- C5: I/O and unclassified exceptions in the pure stages stop the run ----
+
+
+def test_postprocess_io_failure_stops_the_run(tmp_path, monkeypatch):
+    """An OSError from postprocess is a run-level fault, not isolatable (C5)."""
+
+    from media_pipeline import render as render_module
+
+    def boom(*args, **kwargs):  # noqa: ARG005
+        raise OSError("disk full")
+
+    monkeypatch.setattr(render_module, "postprocess_speech", boom)
+    script = _write_script(tmp_path, [_seg("a", "一段。"), _seg("b", "两段。")])
+    run = tmp_path / "run"
+    with pytest.raises(RenderError) as excinfo:
+        render_speech(
+            script,
+            run,
+            tts_python="python",
+            alignment_python="python",
+            tts_model="/m",
+            alignment_model="/m",
+            max_segment_chars=100,
+            _wav_task=FakeTTSEngine(durations={"a": 1.0, "b": 1.0}),
+            _align_task=FakeAlignerEngine(),
+        )
+    assert excinfo.value.run_dir == run
+    report = json.loads((run / "report.json").read_text(encoding="utf-8"))
+    assert report["status"] == STATUS_FAILED
+    assert not (run / "final" / ".complete").exists()
+
+
+def test_caption_io_failure_stops_the_run(tmp_path, monkeypatch):
+    """An OSError from caption loading is a run-level fault, not isolatable."""
+
+    from media_pipeline import render as render_module
+
+    def boom(*args, **kwargs):  # noqa: ARG005
+        raise OSError("alignment unwritable")
+
+    monkeypatch.setattr(render_module, "load_alignment", boom)
+    script = _write_script(tmp_path, [_seg("a", "一段。")])
+    run = tmp_path / "run"
+    with pytest.raises(RenderError):
+        render_speech(
+            script,
+            run,
+            tts_python="python",
+            alignment_python="python",
+            tts_model="/m",
+            alignment_model="/m",
+            max_segment_chars=100,
+            _wav_task=FakeTTSEngine(durations={"a": 1.0}),
+            _align_task=FakeAlignerEngine(),
+        )
+    assert not (run / "final" / ".complete").exists()
+
+
+def test_caption_unclassified_exception_stops_the_run(tmp_path, monkeypatch):
+    """A non-``CaptionError`` exception in the caption stage stops the run."""
+
+    from media_pipeline import render as render_module
+
+    def boom(*args, **kwargs):  # noqa: ARG005
+        raise RuntimeError("unexpected")
+
+    monkeypatch.setattr(render_module, "build_captions", boom)
+    script = _write_script(tmp_path, [_seg("a", "一段。")])
+    run = tmp_path / "run"
+    with pytest.raises(RenderError):
+        render_speech(
+            script,
+            run,
+            tts_python="python",
+            alignment_python="python",
+            tts_model="/m",
+            alignment_model="/m",
+            max_segment_chars=100,
+            _wav_task=FakeTTSEngine(durations={"a": 1.0}),
+            _align_task=FakeAlignerEngine(),
+        )
+    assert not (run / "final" / ".complete").exists()
+
+
+def test_postprocess_failure_is_isolated_and_others_continue(tmp_path):
+    """A deterministic postprocess failure records the segment and continues."""
+
+    def partial_align_task(task: dict) -> dict:
+        seg_dir = Path(task["run_dir"]) / "segments"
+        results = []
+        for seg in task["segments"]:
+            raw = seg_dir / (seg["safe_name"] + ".alignment.raw.json")
+            if seg["id"] == "bad":
+                # No alignment written for this segment: postprocess reads a
+                # missing file and raises AudioPostprocessError (deterministic).
+                results.append({"segment_id": seg["id"], "status": "ok"})
+            else:
+                _, rate, frames = read_wav(seg_dir / (seg["safe_name"] + ".wav"))
+                _write_alignment(raw, seg["text"], frames / rate)
+                results.append({"segment_id": seg["id"], "status": "ok"})
+        return {"runtime_error": None, "segments": results}
+
+    script = _write_script(tmp_path, [_seg("good", "好段。"), _seg("bad", "坏段。")])
+    run = tmp_path / "run"
+    result = render_speech(
+        script,
+        run,
+        tts_python="python",
+        alignment_python="python",
+        tts_model="/m",
+        alignment_model="/m",
+        max_segment_chars=100,
+        _wav_task=FakeTTSEngine(durations={"good": 1.0, "bad": 1.0}),
+        _align_task=partial_align_task,
+    )
+    assert result.status == STATUS_INCOMPLETE
+    by_id = {s.segment_id: s.status for s in result.segments}
+    assert by_id["good"] == "ok"
+    assert by_id["bad"] == "postprocess_failed"
+    assert not (run / "final").exists()
+
+
+# --- C6: publication / completion-transaction failure injection -------------
+
+
+def test_final_publish_failure_returns_not_complete(tmp_path, monkeypatch):
+    """A final artifact publish failure must not return ``complete``."""
+
+    from media_pipeline import render as render_module
+
+    def boom(source, destination):  # noqa: ARG005
+        raise OSError("publish failed")
+
+    monkeypatch.setattr(render_module, "_publish", boom)
+    script = _write_script(tmp_path, [_seg("a", "一段。")])
+    run = tmp_path / "run"
+    with pytest.raises(RenderError):
+        render_speech(
+            script,
+            run,
+            tts_python="python",
+            alignment_python="python",
+            tts_model="/m",
+            alignment_model="/m",
+            max_segment_chars=100,
+            _wav_task=FakeTTSEngine(durations={"a": 1.0}),
+            _align_task=FakeAlignerEngine(),
+        )
+    assert not (run / "final" / ".complete").exists()
+    report = json.loads((run / "report.json").read_text(encoding="utf-8"))
+    assert report["status"] != STATUS_COMPLETE
+
+
+def test_final_report_write_failure_returns_not_complete(tmp_path, monkeypatch):
+    """A report write failure on the success path must not return ``complete``."""
+
+    from media_pipeline import render as render_module
+
+    real_write = render_module._write_report
+
+    def guarded(run_dir, report, *, strict=False):  # noqa: FBT001
+        if strict:
+            raise OSError("report unwritable")
+        real_write(run_dir, report)
+
+    monkeypatch.setattr(render_module, "_write_report", guarded)
+    script = _write_script(tmp_path, [_seg("a", "一段。")])
+    run = tmp_path / "run"
+    with pytest.raises(RenderError):
+        render_speech(
+            script,
+            run,
+            tts_python="python",
+            alignment_python="python",
+            tts_model="/m",
+            alignment_model="/m",
+            max_segment_chars=100,
+            _wav_task=FakeTTSEngine(durations={"a": 1.0}),
+            _align_task=FakeAlignerEngine(),
+        )
+    assert not (run / "final" / ".complete").exists()
+    report = json.loads((run / "report.json").read_text(encoding="utf-8"))
+    assert report["status"] != STATUS_COMPLETE
+
+
+def test_complete_marker_write_failure_returns_not_complete(tmp_path, monkeypatch):
+    """A ``.complete`` write failure leaves no valid completion state."""
+
+    import pathlib
+
+    orig_write_text = pathlib.Path.write_text
+
+    def guarded(self, *args, **kwargs):
+        if self.name == ".complete":
+            raise OSError("marker unwritable")
+        return orig_write_text(self, *args, **kwargs)
+
+    monkeypatch.setattr(pathlib.Path, "write_text", guarded)
+    script = _write_script(tmp_path, [_seg("a", "一段。")])
+    run = tmp_path / "run"
+    with pytest.raises(RenderError):
+        render_speech(
+            script,
+            run,
+            tts_python="python",
+            alignment_python="python",
+            tts_model="/m",
+            alignment_model="/m",
+            max_segment_chars=100,
+            _wav_task=FakeTTSEngine(durations={"a": 1.0}),
+            _align_task=FakeAlignerEngine(),
+        )
+    assert not (run / "final" / ".complete").exists()
+
+
+# --- C5/C6: explicit run-level RenderError is torn down as ``failed`` -------
+
+
+def test_sample_rate_mismatch_marks_report_failed(tmp_path):
+    """An explicit run-level RenderError after the run started is ``failed``."""
+
+    script = _write_script(
+        tmp_path,
+        [_seg("a", "第一段。"), _seg("b", "第二段。")],
+    )
+    run = tmp_path / "run"
+    with pytest.raises(RenderError) as excinfo:
+        render_speech(
+            script,
+            run,
+            tts_python="python",
+            alignment_python="python",
+            tts_model="/m",
+            alignment_model="/m",
+            max_segment_chars=100,
+            _wav_task=FakeTTSEngine(
+                durations={"a": 1.0, "b": 1.0},
+                rates={"a": SAMPLE_RATE, "b": 16_000},
+            ),
+            _align_task=FakeAlignerEngine(),
+        )
+    assert excinfo.value.run_dir == run
+    report = json.loads((run / "report.json").read_text(encoding="utf-8"))
+    assert report["status"] == STATUS_FAILED
+    assert not (run / "final" / ".complete").exists()
+
+
+def test_tts_synthesis_failure_marks_report_failed(tmp_path):
+    """A TTS synthesis RenderError leaves the report ``failed`` with ``run_dir``."""
+
+    script = _write_script(
+        tmp_path,
+        [_seg("first", "第一段。"), _seg("second", "第二段。")],
+    )
+    run = tmp_path / "run"
+    with pytest.raises(RenderError) as excinfo:
+        render_speech(
+            script,
+            run,
+            tts_python="python",
+            alignment_python="python",
+            tts_model="/m",
+            alignment_model="/m",
+            max_segment_chars=100,
+            _wav_task=FakeTTSEngine(
+                durations={"first": 1.0, "second": 1.0},
+                fail_ids={"second"},
+            ),
+            _align_task=FakeAlignerEngine(),
+        )
+    assert excinfo.value.run_dir == run
+    report = json.loads((run / "report.json").read_text(encoding="utf-8"))
+    assert report["status"] == STATUS_FAILED
+    assert not (run / "final" / ".complete").exists()
+
+
+# --- C5: real subprocess protocol preserves the structured manifest ---------
+
+
+def test_run_model_stage_preserves_manifest_on_nonzero_exit(tmp_path):
+    """A non-zero stage exit still yields the structured manifest reason (C5)."""
+
+    import sys
+
+    fake_stage = r"""
+import json
+import sys
+from pathlib import Path
+
+spec = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
+Path(spec["manifest"]).write_text(
+    json.dumps({
+        "runtime_error": "alignment runtime failure on segment 'b': corrupted output",
+        "segments": [{"segment_id": "a", "status": "ok"}],
+    }) + "\n",
+    encoding="utf-8",
+)
+sys.exit(2)
+"""
+    result = _run_model_stage(
+        sys.executable, fake_stage, ("model", {"segments": []})
+    )
+    assert (
+        result["runtime_error"]
+        == "alignment runtime failure on segment 'b': corrupted output"
+    )
+    assert [e["segment_id"] for e in result["segments"]] == ["a"]
+
+
+# --- C4/C8: isolated interpreter loads the current checkout -----------------
+
+
+def test_isolated_interpreter_imports_current_checkout(tmp_path):
+    """The subprocess imports the current checkout via injected PYTHONPATH (C4/C8)."""
+
+    import json
+    import os
+    import subprocess
+    import sys
+    import tempfile
+    from pathlib import Path
+
+    from media_pipeline.render import _SRC
+
+    stage = r"""
+import json
+import sys
+from pathlib import Path
+
+spec = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
+import media_pipeline
+Path(spec["manifest"]).write_text(
+    json.dumps({"media_pipeline_file": media_pipeline.__file__}) + "\n",
+    encoding="utf-8",
+)
+sys.exit(0)
+"""
+    with tempfile.TemporaryDirectory() as tmp:
+        task_file = Path(tmp) / "task.json"
+        manifest = Path(tmp) / "results.json"
+        task_file.write_text(
+            json.dumps({"args": [], "manifest": str(manifest)}),
+            encoding="utf-8",
+        )
+        env = dict(os.environ)
+        env["PYTHONPATH"] = str(_SRC) + os.pathsep + env.get("PYTHONPATH", "")
+        # ``-S`` disables ``site`` so the editable venv install is *not*
+        # processed: only the injected ``PYTHONPATH`` can import media_pipeline.
+        subprocess.run(
+            [sys.executable, "-S", "-c", stage, str(task_file)],
+            capture_output=True,
+            text=True,
+            env=env,
+            check=True,
+        )
+        reported = json.loads(manifest.read_text(encoding="utf-8"))["media_pipeline_file"]
+    norm = reported.replace("\\", "/")
+    assert norm.endswith("src/media_pipeline/__init__.py")
+    assert Path(reported).resolve().parent.parent == Path(_SRC).resolve()
+
+
+# --- C7: timeline integrity tamper / negative tests -------------------------
+
+
+def _good_timeline():
+    return [
+        {"segment_id": "a", "start_frame": 0, "audio_frames": 100, "pause_after_frames": 10},
+        {"segment_id": "b", "start_frame": 110, "audio_frames": 200, "pause_after_frames": 0},
+        {"segment_id": "c", "start_frame": 310, "audio_frames": 50, "pause_after_frames": 5},
+    ]
+
+
+def test_timeline_integrity_passes_for_consistent_timeline(tmp_path):
+    from media_pipeline.render import _verify_timeline_integrity
+
+    _verify_timeline_integrity(_good_timeline(), ["a", "b", "c"], 365, tmp_path)
+
+
+def test_timeline_integrity_rejects_deleted_segment(tmp_path):
+    from media_pipeline.render import _verify_timeline_integrity
+
+    with pytest.raises(RenderError, match="count"):
+        _verify_timeline_integrity(_good_timeline()[:2], ["a", "b", "c"], 365, tmp_path)
+
+
+def test_timeline_integrity_rejects_changed_frame(tmp_path):
+    from media_pipeline.render import _verify_timeline_integrity
+
+    tampered = _good_timeline()
+    tampered[1] = dict(tampered[1])
+    tampered[1]["audio_frames"] = 999
+    with pytest.raises(RenderError, match="start_frame|accumulated"):
+        _verify_timeline_integrity(tampered, ["a", "b", "c"], 365, tmp_path)
+
+
+def test_timeline_integrity_rejects_reordered_segment(tmp_path):
+    from media_pipeline.render import _verify_timeline_integrity
+
+    good = _good_timeline()
+    reordered = [good[0], good[2], good[1]]
+    with pytest.raises(RenderError, match="order"):
+        _verify_timeline_integrity(reordered, ["a", "b", "c"], 365, tmp_path)
+
+
+def test_final_verifier_rejects_tampered_timeline_on_disk(tmp_path):
+    """Tampering the published timeline.json is caught by final verification."""
+
+    from media_pipeline.captions import Caption, render_srt
+    from media_pipeline.render import _verify_final_products
+
+    total_frames = 310
+    captions = [Caption(0.0, total_frames / SAMPLE_RATE, "文字")]
+    write_wav(tmp_path / "final.wav", _waveform(total_frames), SAMPLE_RATE)
+    (tmp_path / "final.srt").write_text(render_srt(captions), encoding="utf-8")
+
+    final_dir = tmp_path
+    timeline = [
+        {"segment_id": "a", "start_frame": 0, "audio_frames": 110, "pause_after_frames": 10},
+        {"segment_id": "b", "start_frame": 120, "audio_frames": 190, "pause_after_frames": 0},
+    ]
+    (final_dir / "timeline.json").write_text(
+        json.dumps(
+            {
+                "sample_rate": SAMPLE_RATE,
+                "total_frames": total_frames,
+                "duration_seconds": total_frames / SAMPLE_RATE,
+                "segments": timeline,
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    # Tamper: drop the second segment from the on-disk timeline.
+    (final_dir / "timeline.json").write_text(
+        json.dumps(
+            {
+                "sample_rate": SAMPLE_RATE,
+                "total_frames": total_frames,
+                "duration_seconds": total_frames / SAMPLE_RATE,
+                "segments": timeline[:1],
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    with pytest.raises(RenderError, match="count"):
+        _verify_final_products(
+            final_dir, SAMPLE_RATE, total_frames, captions, ["a", "b"]
+        )
+
+
+# --- C7/SRT: global caption timing derives from integer frames --------------
+
+
+def _parse_srt(text: str) -> list[tuple[str, str, str]]:
+    """Parse an SRT document into ``(start_ts, end_ts, text)`` event tuples."""
+
+    events = []
+    for block in text.strip().split("\n\n"):
+        lines = block.split("\n")
+        start, end = lines[1].split(" --> ")
+        events.append((start.strip(), end.strip(), "\n".join(lines[2:])))
+    return events
+
+
+def test_global_captions_srt_use_integer_frame_offsets(tmp_path):
+    """The final SRT caption times derive from integer-frame offsets (C7).
+
+    Enough unequal short segments are used so that ``O_i / R`` is generally not
+    a whole number of milliseconds; the expected caption stream is rebuilt from
+    the integer ``start_frame`` offsets and compared to the real SRT. An
+    implementation that accumulated rounded-millisecond segment durations would
+    produce different SRT timestamps and fail this test.
+    """
+
+    from decimal import ROUND_HALF_UP, Decimal
+
+    from media_pipeline.captions import build_captions, format_timestamp, load_alignment
+
+    n_segments = 12
+    durations = {f"s{i}": 0.3 + i * 0.03 for i in range(n_segments)}
+    script = _write_script(
+        tmp_path,
+        [_seg(f"s{i}", f"第{i}段。") for i in range(n_segments)],
+    )
+    run = tmp_path / "run"
+    render_speech(
+        script,
+        run,
+        tts_python="python",
+        alignment_python="python",
+        tts_model="/m",
+        alignment_model="/m",
+        max_segment_chars=100,
+        _wav_task=FakeTTSEngine(durations=durations),
+        _align_task=FakeAlignerEngine(),
+    )
+    timeline = json.loads((run / "final" / "timeline.json").read_text(encoding="utf-8"))
+    request = json.loads((run / "request.json").read_text(encoding="utf-8"))
+    original_text = {seg["id"]: seg["text"] for seg in request["segments"]}
+
+    # Independently rebuild the expected global caption stream from integer frames.
+    expected = []
+    for entry in timeline["segments"]:
+        offset = entry["start_frame"] / SAMPLE_RATE
+        tokens = load_alignment(
+            run / "segments" / (_safe_name(entry["segment_id"]) + ".alignment.adjusted.json")
+        )
+        for caption in build_captions(original_text[entry["segment_id"]], tokens):
+            expected.append(
+                (
+                    format_timestamp(caption.start + offset),
+                    format_timestamp(caption.end + offset),
+                    caption.text,
+                )
+            )
+
+    parsed = _parse_srt((run / "final" / "final.srt").read_text(encoding="utf-8"))
+    assert parsed == expected
