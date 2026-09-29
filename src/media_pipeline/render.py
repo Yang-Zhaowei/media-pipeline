@@ -552,6 +552,7 @@ def render_speech(
         failed_alignment = _run_alignment_stage(
             run_dir, script, safe_names, segments, align_task, report, device
         )
+        report.completed_stages.append("alignment")
 
         # --- Postprocess + captions per segment (pure, CPU) -----------------
         cleaned = _run_postprocess_stage(

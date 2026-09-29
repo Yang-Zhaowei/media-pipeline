@@ -822,6 +822,34 @@ def test_complete_run_writes_completion_marker(tmp_path: Path) -> None:
     assert (run / "final" / ".complete").read_text(encoding="utf-8") == "complete"
 
 
+def test_complete_run_reports_alignment_in_completed_stages(tmp_path: Path) -> None:
+    """A completed run records the alignment stage in ``completed_stages``.
+
+    The pipeline runs ``preflight -> tts -> alignment -> postprocess ->
+    captions -> assemble``; the alignment stage must be recorded so the report
+    does not skip it between tts and postprocess.
+    """
+
+    script = _write_script(tmp_path, [_seg("a", "一段。")])
+    run = tmp_path / "run"
+    render_speech(
+        script,
+        run,
+        tts_python="python",
+        alignment_python="python",
+        tts_model="/m",
+        alignment_model="/m",
+        max_segment_chars=100,
+        _wav_task=FakeTTSEngine(durations={"a": 1.0}),
+        _align_task=FakeAlignerEngine(),
+    )
+    report = json.loads((run / "report.json").read_text(encoding="utf-8"))
+    assert report["status"] == STATUS_COMPLETE
+    assert report["completed_stages"] == [
+        "preflight", "tts", "alignment", "postprocess", "captions", "assemble"
+    ]
+
+
 def test_runtime_failure_leaves_no_valid_completion_marker(tmp_path: Path) -> None:
     script = _write_script(tmp_path, [_seg("a", "一段。")])
     run = tmp_path / "run"
