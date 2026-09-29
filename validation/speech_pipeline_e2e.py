@@ -34,6 +34,7 @@ any failure it exits non-zero -- it never skips and never reuses stale artifacts
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import subprocess
@@ -44,12 +45,15 @@ from pathlib import Path
 _REPO_ROOT = Path(__file__).resolve().parent.parent
 _SRC = _REPO_ROOT / "src"
 
-from e2e_validation import E2EArtifacts, validate_e2e  # noqa: E402
-
+# Add the repo ``src`` and ``tests`` directories *before* importing the portable
+# validation harness (:mod:`e2e_validation` lives in ``tests/``) so this driver
+# runs the current checkout instead of any installed ``media_pipeline``.
 if str(_SRC) not in sys.path:
     sys.path.insert(0, str(_SRC))
 if str(_REPO_ROOT / "tests") not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT / "tests"))
+
+from e2e_validation import E2EArtifacts, validate_e2e  # noqa: E402,PLC0415
 
 # Reviewed Chinese narration instruction: integration input, not a product default.
 _DEFAULT_INSTRUCT = (
@@ -62,6 +66,23 @@ def _require(name: str) -> str:
     if not value:
         raise SystemExit(f"missing required environment variable: {name}")
     return value
+
+
+def _require_alias(*names: str) -> str:
+    """Return the first set environment variable in ``names``.
+
+    A true alias resolver: unlike ``_require(...) or _require(...)`` (which
+    exits when the first name is missing), this keeps looking across every
+    alias so the documented aliases are all honoured and none is dead code.
+    """
+
+    for name in names:
+        value = os.environ.get(name)
+        if value:
+            return value
+    raise SystemExit(
+        "missing required environment variable (any of): " + ", ".join(names)
+    )
 
 
 def _run_stage(python: str, script: Path, *argv: str) -> None:
@@ -105,7 +126,8 @@ import json
 import sys
 from pathlib import Path
 
-from media_pipeline.alignment import AlignmentRequest, validate_wav, load_alignment
+from media_pipeline.alignment import AlignmentRequest, validate_wav
+from media_pipeline.captions import load_alignment
 from media_pipeline.runtimes.qwen_aligner import Qwen3ForcedAlignment
 
 model_path, out_align, wav, request = sys.argv[1], sys.argv[2], sys.argv[3], json.loads(sys.argv[4])
@@ -174,13 +196,9 @@ def main(argv: list[str] | None = None) -> int:
     }
 
     tts_python = _require("MEDIA_PIPELINE_TTS_PYTHON")
-    align_python = _require("MEDIA_ALIGNMENT_PYTHON") or _require(
-        "MEDIA_PIPELINE_ALIGNMENT_PYTHON"
-    )
+    align_python = _require_alias("MEDIA_ALIGNMENT_PYTHON", "MEDIA_PIPELINE_ALIGNMENT_PYTHON")
     tts_model = _require("MEDIA_PIPELINE_TTS_MODEL")
-    align_model = _require("MEDIA_ALIGNMENT_MODEL") or _require(
-        "MEDIA_PIPELINE_ALIGNMENT_MODEL"
-    )
+    align_model = _require_alias("MEDIA_ALIGNMENT_MODEL", "MEDIA_PIPELINE_ALIGNMENT_MODEL")
 
     # --- Process 1: Production TTS -> raw.wav --------------------------------
     synth_script = run_dir / "e2e_synthesize.py"
@@ -201,6 +219,13 @@ def main(argv: list[str] | None = None) -> int:
         ),
     )
 
+    # Snapshot the fresh TTS WAV *immediately* after synthesis and before any
+    # downstream stage runs, so we can prove neither Alignment nor Audio
+    # Postprocess altered it. A baseline captured later (after downstream
+    # stages) would be a false positive and could never detect a mutation.
+    raw_wav_snapshot = raw_wav_path.read_bytes()
+    raw_wav_digest = hashlib.sha256(raw_wav_snapshot).hexdigest()
+
     # --- Process 2: Production Alignment -> alignment.raw.json ---------------
     align_script = run_dir / "e2e_align.py"
     align_script.write_text(_ALIGN_STAGE, encoding="utf-8")
@@ -213,10 +238,13 @@ def main(argv: list[str] | None = None) -> int:
         str(raw_wav_path),
         json.dumps({"text": text, "language": "Chinese"}),
     )
+    # Alignment must not rewrite the input WAV it was handed.
+    if raw_wav_path.read_bytes() != raw_wav_snapshot:
+        raise SystemExit("raw.wav changed after the Alignment stage")
 
     # --- Process 3: portable postprocess + captions + validate --------------
     from media_pipeline.captions import build_captions, compile_srt, load_alignment
-    from media_pipeline.postprocess import compute_trim, postprocess_speech
+    from media_pipeline.postprocess import postprocess_speech
 
     final_wav_path = run_dir / "final.wav"
     adjusted_alignment_path = run_dir / "adjusted.json"
@@ -228,6 +256,9 @@ def main(argv: list[str] | None = None) -> int:
         final_wav_path,
         adjusted_alignment_path,
     )
+    # Audio Postprocess must not rewrite the input WAV it was handed.
+    if raw_wav_path.read_bytes() != raw_wav_snapshot:
+        raise SystemExit("raw.wav changed after the Audio Postprocess stage")
 
     adjusted_tokens = load_alignment(adjusted_alignment_path)
     original_tokens = load_alignment(alignment_path)
@@ -245,8 +276,8 @@ def main(argv: list[str] | None = None) -> int:
         raw_wav_path=raw_wav_path,
         raw_wav_frames=raw_frames,
         raw_wav_sample_rate=raw_rate,
-        raw_wav_snapshot=raw_wav_path.read_bytes(),
-        raw_wav_digest=__import__("hashlib").sha256(raw_wav_path.read_bytes()).hexdigest(),
+        raw_wav_snapshot=raw_wav_snapshot,
+        raw_wav_digest=raw_wav_digest,
         alignment_path=alignment_path,
         token_count=len(original_tokens),
         alignment_sample_rate=raw_rate,
@@ -263,8 +294,8 @@ def main(argv: list[str] | None = None) -> int:
         srt_text=srt_text,
     )
 
-    # compute_trim reproduces the same window postprocess used; assert it does,
-    # so the reported trim range matches the final WAV frame count exactly.
+    # The reported trim window must match the final WAV produced by postprocess,
+    # so the audit's trim range and the actual artifact agree exactly.
     assert trim.kept_frames == final_frames
     assert trim.frame_rate == final_rate
 

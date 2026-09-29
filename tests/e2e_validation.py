@@ -34,6 +34,7 @@ import hashlib
 import json
 import math
 import re
+from decimal import ROUND_HALF_UP, Decimal
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Protocol
@@ -59,7 +60,6 @@ __all__ = [
     "RunChainHooks",
     "align_callable",
     "read_srt",
-    "render_expected_srt",
     "run_chain",
     "snapshot_wav",
     "validate_e2e",
@@ -272,12 +272,11 @@ def run_chain(
     )
 
     # --- proof the input WAV was not touched by postprocess ----------------
+    # The snapshot above was taken immediately after synthesis; if Alignment or
+    # Audio Postprocess altered raw.wav, the byte check below fails. A unit test
+    # injects a raw.wav mutation before postprocess (via ``after_align``) and
+    # relies on this check to catch it, proving the baseline was captured early.
     assert_wav_unchanged((raw_wav_snapshot, raw_wav_digest), raw_wav_path)
-
-    if hooks.after_align is not None:
-        # Unit-test injection point: prove the harness rejects an alignment JSON
-        # that no longer matches the request text (Caption Compiler mismatch).
-        hooks.after_align()
 
     # --- Caption Compiler: adjusted alignment -> final.srt -----------------
     original_tokens = load_alignment(alignment_path)
@@ -484,6 +483,12 @@ def _adjusted_alignment_preserved(artifacts: E2EArtifacts) -> None:
 
     offset = artifacts.trim.start_frame / artifacts.trim.frame_rate
 
+    # Production Postprocess shifts every timestamp by *minus* the quantized
+    # front trim offset (new = old - offset). The sign is fixed by the contract,
+    # so the shift is checked as signed equality, not magnitude: an alignment
+    # shifted by *+*offset (the wrong direction) must fail here.
+    expected_shift = -offset
+
     for index, (old, new) in enumerate(zip(original, adjusted)):
         duration_old = old.end - old.start
         duration_new = new.end - new.start
@@ -491,20 +496,19 @@ def _adjusted_alignment_preserved(artifacts: E2EArtifacts) -> None:
             raise E2EAssertionError(
                 f"adjusted token {index} duration changed: {duration_old} -> {duration_new}"
             )
-        # trim_alignment shifts every timestamp by the *same* quantized offset,
-        # so the per-token shift (magnitude) equals the offset and is identical
-        # across start and end. Durations and gaps are therefore preserved.
+        # A uniform signed shift by the quantized offset preserves every
+        # per-token duration and every gap between tokens.
         start_shift = new.start - old.start
         end_shift = new.end - old.end
-        if abs(abs(start_shift) - offset) > _TIMING_TOL:
+        if abs(start_shift - expected_shift) > _TIMING_TOL:
             raise E2EAssertionError(
                 f"adjusted token {index} start shifted by {start_shift}, "
-                f"expected the quantized offset magnitude {offset}"
+                f"expected the signed quantized offset {expected_shift}"
             )
-        if abs(abs(end_shift) - offset) > _TIMING_TOL:
+        if abs(end_shift - expected_shift) > _TIMING_TOL:
             raise E2EAssertionError(
                 f"adjusted token {index} end shifted by {end_shift}, "
-                f"expected the quantized offset magnitude {offset}"
+                f"expected the signed quantized offset {expected_shift}"
             )
         if abs(start_shift - end_shift) > _TIMING_TOL:
             raise E2EAssertionError(
@@ -544,7 +548,18 @@ def _reconstructed_text_matches(artifacts: E2EArtifacts) -> None:
 
 
 def _srt_valid_and_ordered(artifacts: E2EArtifacts) -> None:
-    """The resulting SRT is non-empty, ordered and valid."""
+    """The resulting SRT is non-empty, ordered and valid.
+
+    This checks the SRT independently of the production renderer: it parses the
+    document with :func:`read_srt` and re-derives the expected millisecond
+    timestamp string for each caption through an *independent* ROUND_HALF_UP
+    oracle (:func:`_srt_timestamp_ms`) rather than by re-running the production
+    ``render_srt``. That way a regression in the production millisecond rounding
+    still surfaces here instead of cancelling out against an identical re-render.
+    Production contract only forbids true overlap: captions may touch
+    (``next.start == previous.end``), so touching is allowed and only a real
+    ``start < previous_end`` fails.
+    """
 
     srt = artifacts.srt_text
     if not srt or not srt.strip():
@@ -564,13 +579,34 @@ def _srt_valid_and_ordered(artifacts: E2EArtifacts) -> None:
             raise E2EAssertionError(f"SRT block {index} has a non-sequential index")
         if not (block["start"] < block["end"]):
             raise E2EAssertionError(f"SRT block {index} has start >= end")
-        if block["start"] < previous_end + _TIMING_TOL:
-            raise E2EAssertionError(f"SRT block {index} is not in ascending order")
+        # Only true overlap fails; touching boundaries are allowed.
+        if block["start"] < previous_end - _TIMING_TOL:
+            raise E2EAssertionError(
+                f"SRT block {index} overlaps the previous block"
+            )
         previous_end = block["end"]
 
-    # The SRT must be exactly the captions rendered through production SRT rules.
-    if render_expected_srt(captions) != srt:
-        raise E2EAssertionError("SRT is not the deterministic render of its captions")
+        # The SRT text is the caption text verbatim, and its timestamps are the
+        # production millisecond ROUND_HALF_UP rendering, checked here through an
+        # independent oracle (see _srt_timestamp_ms) rather than by re-running
+        # the production render_srt, so a rounding regression still surfaces here.
+        if block["text"] != caption.text:
+            raise E2EAssertionError(
+                f"SRT block {index} text {block['text']!r} != caption text "
+                f"{caption.text!r}"
+            )
+        expected_start = _srt_timestamp_ms(caption.start)
+        expected_end = _srt_timestamp_ms(caption.end)
+        if block["start_str"] != expected_start:
+            raise E2EAssertionError(
+                f"SRT block {index} start timestamp {block['start_str']} != "
+                f"production rounding {expected_start}"
+            )
+        if block["end_str"] != expected_end:
+            raise E2EAssertionError(
+                f"SRT block {index} end timestamp {block['end_str']} != "
+                f"production rounding {expected_end}"
+            )
 
 
 def _srt_timing_consistent_with_final_wav(artifacts: E2EArtifacts) -> None:
@@ -593,15 +629,21 @@ def _srt_timing_consistent_with_final_wav(artifacts: E2EArtifacts) -> None:
             )
 
 
-def render_expected_srt(captions: list[Caption]) -> str:
-    """Re-render captions through the production SRT renderer."""
+def _srt_timestamp_ms(seconds: float) -> str:
+    """Render ``seconds`` as an SRT timestamp string (independent oracle).
 
-    blocks = [
-        f"{index}\n{format_timestamp(caption.start)} --> "
-        f"{format_timestamp(caption.end)}\n{caption.text}"
-        for index, caption in enumerate(captions, start=1)
-    ]
-    return "\n\n".join(blocks) + "\n"
+    This reproduces the production millisecond ``ROUND_HALF_UP`` semantics from
+    :func:`media_pipeline.captions.format_timestamp` as a stand-alone helper so
+    the E2E check does not depend on re-running the production renderer.
+    """
+
+    total_ms = int(
+        (Decimal(str(seconds)) * 1000).quantize(Decimal("1"), rounding=ROUND_HALF_UP)
+    )
+    hours, remainder = divmod(total_ms, 3_600_000)
+    minutes, remainder = divmod(remainder, 60_000)
+    secs, millis = divmod(remainder, 1000)
+    return f"{hours:02d}:{minutes:02d}:{secs:02d},{millis:03d}"
 
 
 _SRT_BLOCK = re.compile(
@@ -614,10 +656,11 @@ _SRT_BLOCK = re.compile(
 
 
 def read_srt(document: str) -> list[dict]:
-    """Parse an SRT document into ``{"index", "start", "end", "text"}`` blocks.
+    """Parse an SRT document into blocks with index/start/end/strings/text.
 
-    Timestamps are converted back to seconds so timing can be checked against
-    the WAV. This mirrors the SRT shape :func:`render_srt` produces.
+    Timestamps are parsed both back to seconds (so timing can be checked against
+    the WAV) and kept as their original ``HH:MM:SS,mmm`` string (so the raw
+    millisecond rendering can be checked against the production rounding).
     """
 
     def to_seconds(value: str) -> float:
@@ -632,6 +675,8 @@ def read_srt(document: str) -> list[dict]:
                 "index": int(match.group("index")),
                 "start": to_seconds(match.group("start")),
                 "end": to_seconds(match.group("end")),
+                "start_str": match.group("start"),
+                "end_str": match.group("end"),
                 "text": match.group("text").strip(),
             }
         )

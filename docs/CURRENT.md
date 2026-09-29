@@ -102,11 +102,21 @@ Implemented:
 - two-process ai-core driver `validation/speech_pipeline_e2e.py` + docs, exchanging artifacts through one fresh run dir and printing an audit summary
 - immutable fixtures never substituted for the fresh TTS path; model output checked structurally
 
-Local CPU suite: 223 passed, 6 skipped (was 213 passed, 5 skipped).
+Local CPU suite: 229 passed, 6 skipped (was 223 passed, 6 skipped).
 
 The real E2E remains a two-process sequence (Production TTS and Production
 Alignment live in separate ai-core venvs) and is explicitly gated on GPU E2E.
-Real E2E on ai-core is the last step to close the milestone.
+
+A successful real E2E on ai-core is **not** by itself the closure of Speech
+Pipeline v0. Closure requires, in order:
+
+1. an exact-head real ai-core E2E automated validation PASS;
+2. a full human listening pass of the freshly produced `final.wav`;
+3. a human inspection that the freshly produced `final.srt` text and timing are
+   correctly synced to the audio;
+4. an explicit human acceptance sign-off.
+
+Human listening and SRT sync inspection are required, never optional.
 
 ## Verified on ai-core
 - Production Qwen3-TTS CustomVoice integration passes against the real model.
@@ -130,7 +140,9 @@ environments (see `validation/README.md`):
 → validate_e2e (all required properties)
 ```
 
-Success on ai-core closes the Speech Pipeline v0 milestone.
+Success on ai-core is step 1 of closure; it does not by itself close the
+milestone. Steps 2-4 (human listening + SRT sync inspection + acceptance) still
+must be completed.
 
 ## Not proposed
 

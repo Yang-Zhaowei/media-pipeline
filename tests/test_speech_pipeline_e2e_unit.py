@@ -317,6 +317,72 @@ def test_rejects_alignment_that_does_not_match_text(tmp_path: Path) -> None:
         )
 
 
+#--- signed-shift direction: the harness must reject the wrong shift ---------
+
+
+def test_adjusted_alignment_wrong_direction_shift_is_rejected(tmp_path: Path) -> None:
+    # Production Postprocess shifts every timestamp by *minus* the quantized
+    # offset (new = old - offset). A shift by the *wrong* sign (old + offset)
+    # used to pass under the old magnitude-only check and must now fail.
+    artifacts = run_chain(
+        run_dir=tmp_path,
+        text=TEXT,
+        wav_engine=_FakeTTSEngine(),
+        align_engine=_FakeAlignerEngine(),
+    )
+    offset = artifacts.trim.start_frame / artifacts.trim.frame_rate
+    # Base the candidate on the *original* tokens and shift by *+*offset (wrong
+    # direction). The already-adjusted tokens are original - offset, so the
+    # magnitude-only history would have passed this; the signed check must not.
+    wrong = [
+        AlignedToken(text=t.text, start=t.start + offset, end=t.end + offset)
+        for t in artifacts.original_tokens
+    ]
+    artifacts.adjusted_tokens = wrong
+    with pytest.raises(E2EAssertionError, match="signed quantized offset"):
+        validate_e2e(artifacts)
+
+
+def test_adjusted_alignment_correct_direction_shift_passes(tmp_path: Path) -> None:
+    # A shift by the documented signed direction (original - offset) must pass.
+    artifacts = run_chain(
+        run_dir=tmp_path,
+        text=TEXT,
+        wav_engine=_FakeTTSEngine(),
+        align_engine=_FakeAlignerEngine(),
+    )
+    offset = artifacts.trim.start_frame / artifacts.trim.frame_rate
+    correct = [
+        AlignedToken(text=t.text, start=t.start - offset, end=t.end - offset)
+        for t in artifacts.original_tokens
+    ]
+    artifacts.adjusted_tokens = correct
+    validate_e2e(artifacts)
+
+
+def test_detects_raw_wav_changed_before_postprocess(tmp_path: Path) -> None:
+    # The raw.wav snapshot is captured immediately after synthesis. If the WAV
+    # is mutated before Audio Postprocess reads it, the postprocess-stage
+    # byte-check must fail the run (proving the baseline was captured early,
+    # not after downstream stages).
+    raw_wav_path = tmp_path / "raw.wav"
+
+    def tamper() -> None:
+        samples, frame_rate, _ = read_wav(raw_wav_path)
+        mutated = list(samples)
+        mutated[len(mutated) // 2] += 1
+        write_wav(raw_wav_path, mutated, frame_rate)
+
+    with pytest.raises(E2EAssertionError, match="changed after synthesis"):
+        run_chain(
+            run_dir=tmp_path,
+            text=TEXT,
+            wav_engine=_FakeTTSEngine(),
+            align_engine=_FakeAlignerEngine(),
+            hooks=RunChainHooks(after_align=tamper),
+        )
+
+
 def test_snapshot_helper_detects_bytes_change(tmp_path: Path) -> None:
     wav = tmp_path / "u.wav"
     write_wav(wav, [0, 1000, -1000, 32767], SAMPLE_RATE)

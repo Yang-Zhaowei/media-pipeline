@@ -36,7 +36,7 @@ inherently a two-process sequence.
 | `MEDIA_ALIGNMENT_MODEL` or `MEDIA_PIPELINE_ALIGNMENT_MODEL` | Qwen3 ForcedAligner model path (production Alignment) |
 | `MEDIA_PIPELINE_TTS_PYTHON` | interpreter of the TTS environment |
 | `MEDIA_ALIGNMENT_PYTHON` or `MEDIA_PIPELINE_ALIGNMENT_PYTHON` | interpreter of the Alignment environment |
-| `MEDIA_PIPELINE_E2E_RUN_DIR` | fresh directory for the run artifacts (created if absent) |
+| `MEDIA_PIPELINE_E2E_RUN_DIR` | a fresh, non-existent directory for the run artifacts; the driver refuses an existing one |
 | `MEDIA_PIPELINE_SPEECH_INSTRUCT` | reviewed narration instruction (optional; reviewed default otherwise) |
 
 No host paths, model paths, interpreter paths, tokens, or credentials are
@@ -45,24 +45,26 @@ stale artifacts are never reused.
 
 ## Run
 
-```bash
-# TTS environment
-MEDIA_PIPELINE_TTS_MODEL=... \
-MEDIA_PIPELINE_TTS_PYTHON=/path/to/tts/.venv/python \
-MEDIA_PIPELINE_E2E_RUN_DIR=/tmp/e2e/run1 \
-MEDIA_PIPELINE_SPEECH_INSTRUCT="自然、清晰、克制的中文知识类视频旁白，语速中等，不要夸张。" \
-  python validation/speech_pipeline_e2e.py
+A **single** driver invocation runs everything. The driver itself launches both
+model stages in their own environments through the fresh run directory, so you
+invoke the driver once and pass it both environments' interpreters and models:
 
-# Alignment environment
-MEDIA_ALIGNMENT_MODEL=... \
-MEDIA_ALIGNMENT_PYTHON=/path/to/aligner/.venv/python \
-MEDIA_PIPELINE_E2E_RUN_DIR=/tmp/e2e/run1 \
+```bash
+# One invocation. The driver runs the TTS stage in the TTS environment and the
+# Alignment stage in the Alignment environment, then post-processes, compiles,
+# validates, and prints an audit summary.
+MEDIA_PIPELINE_TTS_MODEL=/srv/ai/models/speech/tts/... \
+MEDIA_PIPELINE_TTS_PYTHON=/srv/ai/apps/media-pipeline/tts/.venv/python \
+MEDIA_ALIGNMENT_MODEL=/srv/ai/models/speech/asr/... \
+MEDIA_ALIGNMENT_PYTHON=/srv/ai/apps/media-pipeline/aligner/.venv/python \
+MEDIA_PIPELINE_E2E_RUN_DIR=/tmp/e2e/run-<timestamp> \
   python validation/speech_pipeline_e2e.py
 ```
 
-Run the two model stages (each in its own environment) pointing at the same
-`MEDIA_PIPELINE_E2E_RUN_DIR`; the driver synthesizes, aligns, post-processes,
-compiles captions, validates, and prints an audit summary.
+The driver creates `MEDIA_PIPELINE_E2E_RUN_DIR` (`exist_ok=False`), so pass a
+fresh, non-existent path on every run: stale artifacts are never reused, and
+re-invoking the driver against a directory it already populated fails instead of
+overwriting a previous run.
 
 ## What it does
 
@@ -99,5 +101,17 @@ it exits non-zero — it never skips and never reuses stale artifacts.
   required properties without CUDA). See `tests/test_speech_pipeline_e2e_unit.py`
   and `tests/test_speech_pipeline_e2e_integration.py` (the integration test is
   gated on GPU E2E and skips on PC_Client).
-- Real GPU E2E on ai-core: **pending** — this driver run is the final step that
-  closes the Speech Pipeline v0 milestone.
+- Real GPU E2E on ai-core: **pending**.
+
+## Milestone closure (required, in order)
+
+Running this driver successfully on ai-core is **not** by itself the closure of
+Speech Pipeline v0. Closure requires **all** of the following, in order:
+
+1. an exact-head real ai-core E2E automated validation PASS from this driver;
+2. a full human listening pass of the freshly produced `final.wav`;
+3. a human inspection that the freshly produced `final.srt` text and timing are
+   correctly synced to the audio;
+4. an explicit human acceptance sign-off.
+
+Human listening and SRT sync inspection are **required**, never optional.
