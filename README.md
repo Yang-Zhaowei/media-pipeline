@@ -39,10 +39,13 @@ The Python production interfaces accept one already-segmented utterance with
 SRT. Only the recorded Chinese / `Uncle_Fu` case has full E2E acceptance; other
 voices and scripts need their own listening check.
 
-There is no full-manuscript entry point, automatic long-script splitting,
-episode assembly, or exact numeric speed / pitch control. Voice cloning and
-VoiceDesign are not implemented. `python -m media_pipeline` only compiles
-existing text and alignment into SRT.
+`render_speech(...)` renders a **pre-segmented** script (a fixed script with
+fixed segments/speaker) to a single episode WAV + SRT in one synchronous
+call; see [render entry-point docs](docs/dev/render-entry-point.md). It is not
+a full-manuscript interface: there is no automatic long-script splitting (ASR),
+no full-manuscript entry point, and no exact numeric speed / pitch control.
+Voice cloning and VoiceDesign are not implemented. `python -m media_pipeline`
+only compiles existing text and alignment into SRT.
 
 [`validation/speech_pipeline_e2e.py`](validation/speech_pipeline_e2e.py) is a
 repeatable validation driver with a fixed reviewed script and speaker, not an
@@ -51,6 +54,10 @@ see [validation instructions](validation/README.md).
 
 For a chapter-based podcast video, see the
 [first-production workflow assessment](docs/workflows/podcast-pilot.md).
+
+`render_speech(...)` is an unmerged work-in-progress entry point; see
+[project state](docs/CURRENT.md) for its pending ai-core and human-listening
+acceptance before it is promoted to a shipped capability.
 
 ## Design Direction
 

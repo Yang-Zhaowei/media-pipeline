@@ -59,6 +59,17 @@ from .tts import (
     validate_request,
     waveform_to_mono_pcm16,
 )
+from .render import (
+    STATUS_COMPLETE,
+    STATUS_FAILED,
+    STATUS_INCOMPLETE,
+    STATUS_RUNNING,
+    RenderError,
+    RenderResult,
+    SegmentResult,
+    load_and_validate_script,
+    render_speech,
+)
 
 # NOTE: alignment.py also defines a ``validate_request``; it is intentionally
 # *not* re-exported at the package root to avoid shadowing the TTS validator.
@@ -70,6 +81,15 @@ __all__ = [
     "AlignmentError",
     "AlignmentMismatchError",
     "AlignmentRequest",
+    "RenderError",
+    "RenderResult",
+    "SegmentResult",
+    "render_speech",
+    "load_and_validate_script",
+    "STATUS_COMPLETE",
+    "STATUS_FAILED",
+    "STATUS_INCOMPLETE",
+    "STATUS_RUNNING",
     "AlignmentRequestError",
     "AlignmentRuntimeError",
     "Caption",

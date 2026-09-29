@@ -129,12 +129,61 @@ Human listening and SRT sync inspection are required, never optional.
   for PR #5, producing a 6.160 s final WAV and two SRT captions. These outputs
   are separate from the immutable regression fixture.
 
+## Work in progress
+### Segmented Speech Render Entry Point v0 (unmerged — PR on `feat/segmented-speech-v0`)
+
+Adds a single sync orchestration boundary on top of the v0 components:
+
+```python
+from media_pipeline import render_speech, load_and_validate_script, RenderError
+render_speech(
+    script_path="script.json",           # validated up front, never rewritten
+    output_dir="run_dir",                 # must not already exist
+    tts_python="python",
+    alignment_python="python",
+    tts_model="/models/qwen3-tts",
+    alignment_model="/models/qwen3-forced-aligner",
+    max_segment_chars=200,
+)
+```
+
+Implemented and **CPU-verified** (unit tests, no CUDA):
+- `render_speech(...)` orchestrator + `load_and_validate_script(...)` preflight.
+- One model load per stage, run as separate one-shot subprocesses; production
+  code never imports `torch`, the TTS/Alignment runtimes, or `tests/` at runtime.
+- Deterministic, CUDA-free path: preflight, timeline, integer-frame WAV
+  assembly, and final verification. All pure-logic unit tests run without CUDA.
+- Failure semantics (per contract C1–C9): preflight & run-level faults raise
+  `RenderError`; per-segment alignment/postprocess/caption failures are recorded
+  and skipped while other segments still publish; no partial episode is written
+  for a failed run, and no catch-all continue.
+- Integer-frame timeline `O_i = Σ(N_j + G_j)` with global caption time = local
+  + `O_i / R`; concatenates only raw WAV data frames and rewrites the header;
+  SRT rendered only at the end with the existing half-up rules; no drift
+  tolerance beyond 0.5 ms + float.
+- C6 layout: `request.json`, `report.json`, `segments/`, `final/` published
+  via `.final.staging` → `.complete`, and `output_dir` refuse-if-exists.
+- `tests/test_render.py` — 25 unit tests covering the C1–C9 checklist (lifecycle
+  load-once, alignment-failed-continue, runtime-fault-stop, timeline/frame
+  accuracy, drift, sample-rate mismatch, zero/overlap/past captions, original
+  WAV preservation, output refusal, and marker discipline).
+
+**Not yet executed — pending:**
+- Real ai-core multi-segment validation (≥3 unequal segments with pauses, with
+  per-stage load-once proof). Do not substitute the PR #5 single-utterance
+  evidence.
+- Human listening and SRT synchronization acceptance for multi-segment output.
+
+See [contract](contracts/segmented-speech-v0.md) for C1–C9 and the
+[render entry-point docs](dev/render-entry-point.md).
+
 ## Next
 
 Evaluate one real chapter-based podcast production, with at least one script
 revision and a final video export. See the
 [workflow assessment](workflows/podcast-pilot.md). No new implementation is
-committed by that assessment.
+committed by that assessment. This does not authorize the segmented-speech
+entry point to proceed past its pending items.
 
 Current production APIs operate on one already-segmented utterance. The E2E
 driver fixes the script and speaker. A convenient manuscript/voice input,
