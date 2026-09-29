@@ -4,10 +4,10 @@ Reviewed implementation: `f34f47aef0d26d0673a2c5334b8185571fae4e8b`.
 Original contract: [Segmented Speech v0](../contracts/segmented-speech-v0.md),
 unchanged from `992f518`, planned against `main` at `795c4b6`.
 
-**Decision: not yet ready for merge.** One narrow C3 preflight acceptance gap
-remains. The real generation, timeline, load-once and recorded human acceptance
-evidence need not be repeated for a repair confined to static preflight.
-This document records a local review; it does not claim a merge or GitHub update.
+**Decision: accepted and merged** (PR #7, 2026-09-30). The narrow C3 preflight
+gap below was closed by a repair confined to static preflight, so the real
+generation, timeline, load-once and recorded human acceptance evidence need not
+be repeated. This document records the local review that preceded the merge.
 
 ## Outstanding acceptance gap
 
@@ -146,11 +146,10 @@ assembly or model lifecycle; a repeat GPU run for that change is unnecessary.
 
 ## Documentation and merge follow-up
 
-README, CURRENT and the entry-point documentation now distinguish completed
-runtime/human validation from the outstanding preflight issue. They remain
-explicitly unmerged. The original contract and regression fixtures are unchanged.
+Merged on 2026-09-30. README, CURRENT and the entry-point documentation now
+describe the completed runtime/human validation without unmerged notices. The
+original contract and regression fixtures are unchanged.
 
-After the narrow repair, record its SHA/test results and close the issue above.
-Only after the owner merges: record the merge SHA, move the entry point to
-Completed and remove unmerged notices. Preserve the historical PR #5 closure;
+The C3 preflight repair and its CPU tests were recorded; the merge was captured
+and the entry point moved to Completed. Preserve the historical PR #5 closure;
 HTML slides, video composition and NLE operations stay outside this feature.

@@ -55,10 +55,8 @@ see [validation instructions](validation/README.md).
 For a chapter-based podcast video, see the
 [first-production workflow assessment](docs/workflows/podcast-pilot.md).
 
-`render_speech(...)` is unmerged PR #7. Real ai-core multi-segment generation,
-load-once instrumentation, and recorded human acceptance are complete. Final
-acceptance at `f34f47a` still requires a narrow input-preflight correction;
-see the [acceptance review](docs/validation/segmented-speech-v0-acceptance.md).
+Real ai-core multi-segment generation, load-once instrumentation, and recorded
+human acceptance are complete; see the [acceptance review](docs/validation/segmented-speech-v0-acceptance.md).
 Identical voice/instruction settings do not guarantee identical emotion or
 prosody across independently generated segments.
 

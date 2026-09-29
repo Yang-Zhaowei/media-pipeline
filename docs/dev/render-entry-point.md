@@ -2,10 +2,10 @@
 
 ## Status
 
-**Unmerged PR #7**, reviewed at `f34f47a`. The real ai-core multi-segment run,
-load-once instrumentation and recorded human acceptance are complete. A narrow
-C3 preflight defect remains; see the [acceptance review](../validation/segmented-speech-v0-acceptance.md)
-and [project state](../CURRENT.md). These are separate from PR #5 evidence.
+`render_speech` is the merged pre-segmented render entry point (PR #7). The real
+ai-core multi-segment run, load-once instrumentation and recorded human
+acceptance are complete; see the [acceptance review](../validation/segmented-speech-v0-acceptance.md)
+and [project state](../CURRENT.md). These records are separate from PR #5 evidence.
 
 ## Purpose
 
@@ -109,8 +109,8 @@ with two injectable fake model engines, covering the C1–C9 checklist: lifecycl
 load-once, alignment-failed-continue, runtime-fault-stop, timeline/frame
 accuracy, accumulation drift, sample-rate mismatch, zero/overlap/past captions,
 original-WAV preservation, output-directory refusal, and marker discipline.
-Pure-logic unit tests run without CUDA. At `f34f47a`, the local full suite passed
-287 tests with six gated GPU skips (54 render tests included). The ai-core
-evidence at `8df5262` and its applicability to the metadata-only follow-up are
-recorded in the acceptance review. A successful report and `final/.complete`
-are required: an interrupted publication can leave unfinished files in `final/`.
+Pure-logic unit tests run without CUDA; the local full suite passes with only
+six gated GPU skips (including 54 render tests). The ai-core generation, load-once
+instrumentation and human acceptance are recorded in the acceptance review. A
+successful report and `final/.complete` are required: an interrupted publication
+can leave unfinished files in `final/`.
