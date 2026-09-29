@@ -236,6 +236,68 @@ def test_preflight_reports_all_static_errors_at_once(tmp_path: Path) -> None:
     assert script.read_text(encoding="utf-8").count('"id"') == 4
 
 
+def test_preflight_malformed_segment_does_not_crash_and_summarizes_all(tmp_path: Path) -> None:
+    """A non-object segment (``null``) is a summarised preflight error, not a crash.
+
+    ``_validate_script_data`` must not raise a bare ``TypeError`` from the
+    ``ValidatedSegment`` construction: a ``null`` entry is already reported by
+    ``_validate_segments`` and must be reported *together* with the other
+    simultaneous top-level and segment errors in a single ``RenderError`` (C3).
+    """
+
+    script = _write_script(tmp_path, [None], language=123, bogus="field")
+    with pytest.raises(RenderError) as excinfo:
+        render_speech(
+            script,
+            tmp_path / "run",
+            tts_python="python",
+            alignment_python="python",
+            tts_model="/m",
+            alignment_model="/m",
+            max_segment_chars=100,
+            _wav_task=lambda task: {},  # noqa: ARG005  must never be reached
+            _align_task=lambda task: {},  # noqa: ARG005
+        )
+    message = str(excinfo.value)
+    # Every static problem the request carries is reported together.
+    assert "segment[0] must be an object" in message
+    assert "language is required" in message
+    assert "unknown top-level field 'bogus'" in message
+    # No model engine was constructed: preflight finished before any model.
+    assert FakeTTSEngine.loads == 0
+    assert FakeAlignerEngine.loads == 0
+
+
+def test_preflight_too_long_segment_reports_segment_id(tmp_path: Path) -> None:
+    """A too-long segment error carries the segment id when one is available.
+
+    The summarised message must be locatable: it includes the raw segment id,
+    the actual length and the configured limit (C3).
+    """
+
+    script = _write_script(
+        tmp_path,
+        [{"id": "too-long-seg", "text": "x" * 15, "pause_after_ms": 0}],
+    )
+    with pytest.raises(RenderError) as excinfo:
+        render_speech(
+            script,
+            tmp_path / "run",
+            tts_python="python",
+            alignment_python="python",
+            tts_model="/m",
+            alignment_model="/m",
+            max_segment_chars=10,
+            _wav_task=lambda task: {},  # noqa: ARG005  must never be reached
+            _align_task=lambda task: {},  # noqa: ARG005
+        )
+    message = str(excinfo.value)
+    assert "too-long-seg" in message
+    assert "15" in message
+    assert "10" in message
+    assert "over the limit" in message
+
+
 def test_preflight_rejects_unknown_fields_and_non_string_ids(tmp_path: Path) -> None:
     script = _write_script(
         tmp_path,

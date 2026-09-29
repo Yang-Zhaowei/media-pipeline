@@ -260,7 +260,15 @@ def _validate_script_data(
         errors.append("segments is required and must be a non-empty array")
     else:
         _validate_segments(raw_segments, max_segment_chars, errors)
-        segments_list = [dict(seg) for seg in raw_segments]
+        # Build the usable list only from entries that are actually objects: a
+        # malformed entry (for example ``null``) is already reported by
+        # ``_validate_segments`` and must stay a summarised preflight error,
+        # so this comprehension must never raise here (C3). ``segments_list``
+        # is only consumed on the no-errors path, where every segment is a
+        # validated dict, so the filter does not change successful results.
+        segments_list = [
+            dict(seg) for seg in raw_segments if isinstance(seg, dict)
+        ]
 
     if errors:
         return ValidatedScript("", "", "", max_segment_chars, []), errors
@@ -311,8 +319,12 @@ def _validate_segments(
                 "(whitespace or punctuation only is not alignable)"
             )
         elif len(text) > max_segment_chars:
+            # Include the segment id when available so the summarised error is
+            # locatable (C3). ``segment_id`` is ``None`` only when the id itself
+            # was already rejected above.
+            id_ref = f" (segment id {segment_id!r})" if segment_id is not None else ""
             errors.append(
-                f"{where}.text is {len(text)} code points, over the limit of "
+                f"{where}.text{id_ref} is {len(text)} code points, over the limit of "
                 f"{max_segment_chars}; reject, do not split or truncate"
             )
 
