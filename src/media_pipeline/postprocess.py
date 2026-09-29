@@ -38,7 +38,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Sequence
 
-from .captions import AlignedToken, parse_alignment
+from .captions import AlignedToken, AlignmentError, parse_alignment
 
 __all__ = [
     "DEFAULT_FADE_IN",
@@ -299,7 +299,12 @@ def read_wav(path: str | Path) -> tuple[list[int], int, int]:
             framerate = handle.getframerate()
             nframes = handle.getnframes()
             raw = handle.readframes(nframes)
-    except (OSError, wave.Error) as exc:
+    except OSError as exc:
+        # A missing, unreadable, or otherwise inaccessible WAV is a filesystem
+        # (I/O) fault. Propagate it so callers can treat it as a run-level stop
+        # instead of conflating it with a format validation failure.
+        raise
+    except wave.Error as exc:
         raise AudioPostprocessError(f"cannot read WAV {path}: {exc}") from exc
 
     if nchannels != 1 or sampwidth != 2:
@@ -355,12 +360,35 @@ def postprocess_speech(
         raise AudioPostprocessError(
             f"{alignment_path} is not valid JSON: {exc}"
         ) from exc
+    # An OSError here (missing/unreadable alignment file) is a filesystem I/O
+    # fault. It is intentionally not wrapped into AudioPostprocessError so the
+    # caller can stop the run rather than treat it as an isolatable
+    # per-segment validation failure.
     except OSError as exc:
-        raise AudioPostprocessError(f"cannot read alignment {alignment_path}: {exc}") from exc
+        raise
+
+    # The alignment must be a JSON array at the top level. A well-formed JSON
+    # value of the wrong shape (``null``, a number, an object, ...) is a
+    # deterministic validation failure, not a filesystem I/O fault and not a
+    # program bug, so reject it here up front as an isolatable per-segment
+    # failure rather than letting ``parse_alignment`` raise an unclassified
+    # ``TypeError`` while iterating the wrong shape (C5). Do not broaden the
+    # ``parse_alignment`` handler below to ``TypeError``/``Exception``.
+    if not isinstance(raw_alignment, list):
+        raise AudioPostprocessError(
+            f"{alignment_path} must contain a JSON array of alignment items, "
+            f"got {type(raw_alignment).__name__}"
+        )
 
     try:
         tokens = parse_alignment(raw_alignment)
-    except Exception as exc:  # captions raises AlignmentError; treat as unusable
+    except AlignmentError as exc:
+        # Only the deterministic alignment validation failure (malformed,
+        # overlapping, or text-mismatched alignment) is an isolatable
+        # per-segment fault (C5). Any other exception -- a RuntimeError, a
+        # TypeError, or some other program/runtime bug -- must propagate as a
+        # run-level failure and never be mis-classified as an isolatable
+        # segment failure.
         raise AudioPostprocessError(str(exc)) from exc
 
     # Always compute the plan from this WAV and alignment: a plan built for a

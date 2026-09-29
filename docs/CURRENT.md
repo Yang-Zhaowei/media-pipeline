@@ -129,18 +129,44 @@ Human listening and SRT sync inspection are required, never optional.
   for PR #5, producing a 6.160 s final WAV and two SRT captions. These outputs
   are separate from the immutable regression fixture.
 
+## Work in progress
+### Segmented Speech Render Entry Point v0 — PR #7, unmerged
+
+The synchronous `render_speech(...)` entry point accepts a caller-segmented
+JSON script, a speaker/instruction and explicit runtime/model paths. It reuses
+all four production components. TTS processes all segments in one model session,
+then Alignment processes their independent local WAVs in one model session.
+CPU postprocessing and integer-frame assembly produce one WAV, SRT and timeline.
+No automatic splitting, regeneration, resume, or partial episode publication.
+
+At reviewed head `f34f47a`, local tests passed **287 tests, 6 gated GPU skips**,
+including 54 render tests. Real ai-core validation at `8df5262` produced a
+three-segment, 24.71 s episode. Separate real instrumentation proved one load
+and three calls per stage. Human listening and SRT synchronization acceptance
+are recorded. The follow-up commit only corrects completed-stage metadata.
+
+**Final acceptance remains blocked by C3 preflight:** non-object segment entries
+can escape as `TypeError` instead of aggregated `RenderError`; over-budget
+messages omit segment IDs. Correct these and add focused CPU regressions.
+This does not require another GPU inference run if the repair stays in preflight.
+
+See the [acceptance review](validation/segmented-speech-v0-acceptance.md),
+[original contract](contracts/segmented-speech-v0.md) and
+[entry-point documentation](dev/render-entry-point.md). The original Speech
+Pipeline v0 milestone remains closed; this additional interface is not yet merged.
+
 ## Next
 
-Evaluate one real chapter-based podcast production, with at least one script
-revision and a final video export. See the
-[workflow assessment](workflows/podcast-pilot.md). No new implementation is
-committed by that assessment.
+Complete the narrow PR #7 preflight correction and CPU verification. After owner
+merge, record the merge commit and move the segmented entry point to Completed;
+remove its unmerged notices without changing the original PR #5 evidence.
 
-Current production APIs operate on one already-segmented utterance. The E2E
-driver fixes the script and speaker. A convenient manuscript/voice input,
-long-script segmentation, and whole-episode WAV/SRT assembly are not delivered
-by PR #5. First establish what the real pilot needs and what existing tools
-already cover; do not introduce a generic orchestration subsystem.
+Then evaluate one real chapter-based podcast production, including a script
+revision and final video export; see the [workflow assessment](workflows/podcast-pilot.md).
+The agent supplies the segmented manuscript; external tools supply HTML slides,
+visuals and FFmpeg/NLE composition. Identical TTS instructions do not guarantee
+consistent emotion across independent generations. That observation does not
+expand this PR into voice continuity or automatic repair work.
 
 ## Not proposed
 
