@@ -1,14 +1,17 @@
 # Media Pipeline
 Local-first AI-assisted media processing pipeline.
-## Current milestone
-Close Speech Pipeline v0 by validating the existing production components end to end:
+## Current state
+Speech Pipeline v0 is complete: the existing production components passed real
+ai-core E2E validation and human listening / subtitle synchronization acceptance.
 `text → TTS → forced alignment → audio postprocess → caption compiler → WAV + SRT`
 Completed:
 - Caption Compiler v0
 - Audio Postprocess v0
 - Production TTS v0
 - Production Alignment v0
-Immediate task: **full production Speech Pipeline v0 E2E validation**.
+Closure evidence: `docs/validation/speech-v0-closure.md` (PR #5).
+Next: evaluate one real podcast production using existing tools first; see
+`docs/workflows/podcast-pilot.md`. This evaluation does not authorize new features.
 Do not add new modalities, NLE integration, general orchestration, or other scope unless explicitly requested.
 ## Repository evidence
 - `experiments/`: previously working GPU smoke tests; reference only.

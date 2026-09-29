@@ -13,11 +13,11 @@ Real end-to-end validation of the full production Speech Pipeline v0 on ai-core:
 ## Why two processes
 
 Production TTS and Production Alignment live in **two separate GPU virtual
-environments** on ai-core. A single process cannot import both, so the two
-model stages run in their own environments and exchange explicit artifacts
-through one fresh run directory. Only the portable stages (Audio Postprocess,
-Caption Compiler) plus the validation run in the driver process. This is
-inherently a two-process sequence.
+environments** on ai-core. Rather than requiring either environment to contain
+both runtimes, the two model stages run sequentially as child processes and
+exchange artifacts through one fresh run directory. The portable stages
+(Audio Postprocess, Caption Compiler) and validation run in the parent driver.
+No environment consolidation is needed.
 
 ## Prerequisites
 
@@ -71,11 +71,14 @@ invoke the driver once and pass it both environments' interpreters and models:
 # One invocation. The driver runs the TTS stage in the TTS environment and the
 # Alignment stage in the Alignment environment, then post-processes, compiles,
 # validates, and prints an audit summary.
-MEDIA_PIPELINE_TTS_MODEL=/srv/ai/models/speech/tts/... \
-MEDIA_PIPELINE_TTS_PYTHON=/srv/ai/apps/media-pipeline/tts/.venv/python \
-MEDIA_ALIGNMENT_MODEL=/srv/ai/models/speech/asr/... \
-MEDIA_ALIGNMENT_PYTHON=/srv/ai/apps/media-pipeline/aligner/.venv/python \
-MEDIA_PIPELINE_E2E_RUN_DIR=/tmp/e2e/run-<timestamp> \
+# Set these to actual model directories, venv interpreters, and a new output
+# directory on your integration host. On Linux, a venv interpreter is normally
+# <venv>/bin/python.
+MEDIA_PIPELINE_TTS_MODEL="/path/to/tts-model" \
+MEDIA_PIPELINE_TTS_PYTHON="/path/to/tts-venv/bin/python" \
+MEDIA_ALIGNMENT_MODEL="/path/to/alignment-model" \
+MEDIA_ALIGNMENT_PYTHON="/path/to/alignment-venv/bin/python" \
+MEDIA_PIPELINE_E2E_RUN_DIR="/path/to/new-run-directory" \
   python validation/speech_pipeline_e2e.py
 ```
 
@@ -83,6 +86,11 @@ The driver creates `MEDIA_PIPELINE_E2E_RUN_DIR` (`exist_ok=False`), so pass a
 fresh, non-existent path on every run: stale artifacts are never reused, and
 re-invoking the driver against a directory it already populated fails instead of
 overwriting a previous run.
+
+This driver reads the fixed `tests/fixtures/speech-smoke-001/original.txt` and
+uses `Chinese` / `Uncle_Fu`. Only the narration instruction is configurable.
+It is not an arbitrary-manuscript / speaker entry point; see the
+[podcast workflow assessment](../docs/workflows/podcast-pilot.md).
 
 ## What it does
 
@@ -98,16 +106,17 @@ overwriting a previous run.
 ## Required properties validated (`validate_e2e`)
 
 - The raw input WAV remains byte-identical; the produced `final.wav` keeps the
-  `frame_rate`, total frame count, and channel layout of the input, and equals
-  the integer-frame quantized kept window. Short fades are applied at the two
+  sample rate and mono PCM16 format, with frame count equal to the retained
+  integer-frame window (which may be shorter than the input). Short fades are applied at the two
   new edges of that kept window, so the kept window's samples are intentionally
   not byte-identical to the raw input. The adjusted timestamps use the actual
   quantized front trim offset; the production audio processing itself follows
   the existing `postprocess_speech` contract.
 - Every token keeps its duration and relative order; legitimate gaps are
   preserved; each timestamp shifts by exactly the signed quantized trim offset.
-- Alignment integrity: no duplicate tokens, no real overlap (touching is
-  allowed), no blank records, and no token running past the trimmed WAV.
+- Alignment integrity: token text, order and count are preserved (repeated
+  words are legitimate), raw records pass production validation, and adjusted
+  timing feeds the production caption compiler.
 - Caption and SRT integrity: the SRT text equals the reviewed original text,
   the caption count matches the caption compiler, and every caption timestamp
   is non-empty and inside the final WAV.
@@ -124,9 +133,16 @@ it exits non-zero — it never skips and never reuses stale artifacts.
   required properties without CUDA). See `tests/test_speech_pipeline_e2e_unit.py`
   and `tests/test_speech_pipeline_e2e_integration.py` (the integration test is
   gated on GPU E2E and skips on PC_Client).
-- Real GPU E2E on ai-core: **pending**.
+- Local CPU review result: **233 passed, 6 skipped** at PR head `93c650d`.
+- Real GPU E2E on ai-core: **passed** at the same PR head; E2E unit + integration
+  suites: **21 passed in 14.81 s**. This is recorded run evidence, not a GPU
+  rerun performed by the documentation update.
+- Human listening / subtitle synchronization acceptance: **passed**, confirmed
+  by the repository owner on 2026-09-29.
+- Speech Pipeline v0: **closed**. See
+  [closure evidence](../docs/validation/speech-v0-closure.md).
 
-## Milestone closure (required, in order)
+## Closure criteria (satisfied)
 
 Running this driver successfully on ai-core is **not** by itself the closure of
 Speech Pipeline v0. Closure requires **all** of the following, in order:

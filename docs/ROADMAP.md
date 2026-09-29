@@ -19,9 +19,10 @@ operation. It reuses complete existing capabilities first, and adapts or
 builds only the remaining demonstrated gap, stopping once the gap is
 closed.
 
-## Current committed milestone
+## Completed milestone
 
-Close Speech Pipeline v0:
+Speech Pipeline v0 closed on 2026-09-29 via PR #5 and human acceptance.
+See [recorded evidence](validation/speech-v0-closure.md).
 
 text
 → TTS
@@ -30,7 +31,7 @@ text
 → caption compiler
 → WAV + SRT
 
-Stopping condition:
+Met stopping condition:
 
 A supported production utterance runs through the complete production
 path on ai-core and produces validated final WAV and SRT artifacts.
@@ -41,11 +42,12 @@ is required to close this milestone.
 
 ## Next gate: real workflow evaluation
 
-After Speech Pipeline v0 is complete, stop feature development.
+Speech Pipeline v0 is complete. Stop speculative feature development and
+evaluate the owner's [podcast workflow](workflows/podcast-pilot.md).
 
 Use media-pipeline in one real short-form production with:
 
-- one actual target NLE;
+- one actual finishing tool (FFmpeg or a target NLE, as requested by the owner);
 - one actual Agent host;
 - real source media;
 - narration and captions;
