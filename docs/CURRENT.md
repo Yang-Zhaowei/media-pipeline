@@ -1,9 +1,12 @@
 # Current State
 ## Milestone
-Speech Pipeline v0.
-Current task:
-**End-to-end validation of the full production Speech Pipeline v0**
+**Speech Pipeline v0 — complete (2026-09-29).**
 `text → TTS → forced alignment → audio postprocess → caption compiler → WAV + SRT`
+
+PR #5 is merged. Real ai-core E2E validation and human listening / SRT
+synchronization acceptance are complete. See
+[closure evidence](validation/speech-v0-closure.md) for the exact tested commit,
+artifact metadata, test results, and evidence limits.
 ## Completed
 ### Caption Compiler v0
 Merged via PR #1.
@@ -93,28 +96,28 @@ Production Alignment v0 intentionally operates on one already-segmented utteranc
 per request; long-text splitting and orchestration remain outside this module.
 
 ### Speech Pipeline E2E Validation v0
-Validation code (no product changes): portable harness + gated tests + a two-process ai-core driver.
+Merged via PR #5. Validation code only: portable harness + gated tests + a
+driver running the two model stages in separate ai-core environments.
 
 Implemented:
-- portable, CUDA-free harness `tests/e2e_validation.py`: `run_chain` / `validate_e2e` encoding every required E2E property (WAV unchanged by trim, alignment shift = quantized offset, token/caption/SRT integrity, production postprocess + captions + alignment validation), with tamper hooks
-- CPU unit test `tests/test_speech_pipeline_e2e_unit.py` (10 tests): end-to-end + per-property + failure/injection + negative cases with production interfaces, no CUDA
+- portable, CUDA-free harness `tests/e2e_validation.py`: `run_chain` / `validate_e2e` checking raw WAV preservation, signed quantized alignment shifts, and token/caption/SRT integrity, with tamper hooks
+- CPU unit tests `tests/test_speech_pipeline_e2e_unit.py` (17 tests): end-to-end, invariants, failure injection, and negative cases without CUDA
 - gated real-runtime integration test `tests/test_speech_pipeline_e2e_integration.py`: runs the two production model stages in their own environments (fail-not-skip; skips only when GPU E2E config is unset)
 - two-process ai-core driver `validation/speech_pipeline_e2e.py` + docs, exchanging artifacts through one fresh run dir and printing an audit summary
 - immutable fixtures never substituted for the fresh TTS path; model output checked structurally
 
-Local CPU suite: 229 passed, 6 skipped (was 223 passed, 6 skipped).
+Local CPU suite at the reviewed PR head: **233 passed, 6 skipped**. All six
+skips are gated GPU tests; they are not GPU validation.
 
 The real E2E remains a two-process sequence (Production TTS and Production
 Alignment live in separate ai-core venvs) and is explicitly gated on GPU E2E.
 
-A successful real E2E on ai-core is **not** by itself the closure of Speech
-Pipeline v0. Closure requires, in order:
+Closure requirements have all been met:
 
-1. an exact-head real ai-core E2E automated validation PASS;
-2. a full human listening pass of the freshly produced `final.wav`;
-3. a human inspection that the freshly produced `final.srt` text and timing are
-   correctly synced to the audio;
-4. an explicit human acceptance sign-off.
+1. Real ai-core E2E automated validation passed at PR head `93c650d`.
+2. Full human listening of the fresh `final.wav` passed.
+3. Human inspection of the fresh SRT text and synchronization passed.
+4. The repository owner explicitly confirmed human acceptance on 2026-09-29.
 
 Human listening and SRT sync inspection are required, never optional.
 
@@ -122,29 +125,22 @@ Human listening and SRT sync inspection are required, never optional.
 - Production Qwen3-TTS CustomVoice integration passes against the real model.
 - Qwen3 ForcedAligner produces character-level Chinese timestamps.
 - Real speech/alignment regression outputs are stored in `tests/fixtures/speech-smoke-001/`.
+- Fresh Production TTS -> Alignment -> Postprocess -> Captions passed on ai-core
+  for PR #5, producing a 6.160 s final WAV and two SRT captions. These outputs
+  are separate from the immutable regression fixture.
 
 ## Next
 
-The end-to-end validation harness for the full production Speech Pipeline v0
-is complete on PC_Client (all production stages merged; suite green). The
-automated step of closure -- an exact-head real ai-core E2E PASS -- is ready to
-run on ai-core; the human steps (listening + SRT sync inspection + acceptance)
-are not automated and must still be completed.
+Evaluate one real chapter-based podcast production, with at least one script
+revision and a final video export. See the
+[workflow assessment](workflows/podcast-pilot.md). No new implementation is
+committed by that assessment.
 
-Run the two-process E2E once, on ai-core, using the TTS and Alignment
-environments (see `validation/README.md`):
-
-```text
-→ TTS          (TTS environment):   text → raw.wav
-→ forced alignment (Alignment env.): raw.wav → alignment.raw.json
-→ audio post-processing (portable): raw.wav + alignment.raw.json → final.wav + adjusted.json
-→ caption compilation (portable):   → final.srt
-→ validate_e2e (all required properties)
-```
-
-Success on ai-core is step 1 of closure; it does not by itself close the
-milestone. Steps 2-4 (human listening + SRT sync inspection + acceptance) still
-must be completed.
+Current production APIs operate on one already-segmented utterance. The E2E
+driver fixes the script and speaker. A convenient manuscript/voice input,
+long-script segmentation, and whole-episode WAV/SRT assembly are not delivered
+by PR #5. First establish what the real pilot needs and what existing tools
+already cover; do not introduce a generic orchestration subsystem.
 
 ## Not proposed
 

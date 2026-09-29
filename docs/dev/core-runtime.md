@@ -72,7 +72,23 @@ Vision:
 
 `/srv/ai/models/vision/`
 
-## Current limitation
+## Full Speech Pipeline v0 acceptance
+
+PR #5 records a real E2E PASS at commit
+`93c650d2ae03e2a0771ff1f7aa9089a7a23e90ee`: fresh Production TTS output passed
+Production Alignment, Audio Postprocess, and Caption Compiler on ai-core.
+The two model stages used their existing separate environments.
+
+The final WAV is mono PCM16, 24000 Hz, 147840 frames (6.160 s), with two SRT
+captions. The real E2E test passed; the E2E unit + integration suites recorded
+21 passed in 14.81 s. Human listening and subtitle synchronization acceptance
+were confirmed by the repository owner on 2026-09-29.
+
+See [closure evidence](../validation/speech-v0-closure.md). This records the
+reported ai-core run; the documentation update did not rerun GPU inference or
+re-inventory package versions. Versions above retain their original provenance.
+
+## Runtime boundary
 
 The TTS and forced-alignment integrations currently depend on separate Python environments.
 

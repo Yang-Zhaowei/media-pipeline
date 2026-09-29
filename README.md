@@ -6,7 +6,7 @@ Local-first AI-assisted media processing pipeline for turning scripts and media 
 
 Early development.
 
-The current milestone is **Speech Pipeline v0**:
+**Speech Pipeline v0 is complete.** The production path is:
 
 ```text
 text
@@ -24,15 +24,33 @@ Completed production components:
 - Production TTS v0
 - Production Alignment v0
 
-Production TTS has been validated against the real Qwen3-TTS CustomVoice
-runtime on the GPU integration host. Production Alignment v0 promotes the
-previously verified Qwen3 ForcedAligner experiment into portable project code.
-
-The current implementation task is to validate the production stages together
-end to end: `text → TTS → forced alignment → audio post-processing → caption
-compilation → WAV + SRT`.
+PR #5 validated fresh Production TTS output through every subsequent production
+stage on `ai-core`. The final WAV and SRT passed automated checks and human
+listening / synchronization acceptance. See the
+[closure evidence](docs/validation/speech-v0-closure.md).
 
 See [`docs/CURRENT.md`](docs/CURRENT.md) for the current project state.
+
+## What is usable today
+
+The Python production interfaces accept one already-segmented utterance with
+`text`, `language`, a model-supported `speaker`, and an optional natural-language
+`instruct` describing delivery. The stages produce a mono PCM16 WAV and matching
+SRT. Only the recorded Chinese / `Uncle_Fu` case has full E2E acceptance; other
+voices and scripts need their own listening check.
+
+There is no full-manuscript entry point, automatic long-script splitting,
+episode assembly, or exact numeric speed / pitch control. Voice cloning and
+VoiceDesign are not implemented. `python -m media_pipeline` only compiles
+existing text and alignment into SRT.
+
+[`validation/speech_pipeline_e2e.py`](validation/speech_pipeline_e2e.py) is a
+repeatable validation driver with a fixed reviewed script and speaker, not an
+arbitrary-script product interface. It uses the two existing GPU environments;
+see [validation instructions](validation/README.md).
+
+For a chapter-based podcast video, see the
+[first-production workflow assessment](docs/workflows/podcast-pilot.md).
 
 ## Design Direction
 
@@ -54,46 +72,21 @@ Pure processing components should run without CUDA and remain portable across Wi
 
 ## Roadmap
 
-### Speech Pipeline v0
+After closing Speech Pipeline v0, evaluate one real production, including a
+revision and final export. Reuse existing authoring, browser rendering, FFmpeg
+or NLE capabilities first. Add project code only for a reproducible gap that
+passes the [feature admission rule](docs/ROADMAP.md).
 
-The current milestone is to productionize and validate the complete speech pipeline:
-
-```text
-text
-→ TTS
-→ forced alignment
-→ audio post-processing
-→ caption compilation
-→ WAV + SRT
-```
-
-Current component status:
-
-- Caption Compiler v0 — complete
-- Audio Postprocess v0 — complete
-- Production TTS v0 — complete
-- Production Alignment v0 — complete
-
-The remaining milestone work is to validate the production stages together as a real end-to-end pipeline and confirm that script input can reliably produce final WAV and SRT artifacts.
-
-The exact orchestration interface is intentionally not fixed yet. HTTP APIs, MCP, job queues, and broader deployment architecture are outside the current milestone.
-
-### Later directions
-
-Potential later work includes:
-
-- ASR workflow
-- vision-based media analysis
-- remote compute APIs
-- agent / MCP integration
-- NLE automation
-- higher-level pipeline orchestration
+HTTP, MCP, ASR, Vision, NLE automation, environment consolidation, and generic
+orchestration are not committed next milestones.
 
 ## Repository Layout
 
 ```text
 docs/
   CURRENT.md          Current milestone and project state
+  validation/         Recorded milestone acceptance evidence
+  workflows/          Real-production assessment and boundaries
   dev/                Verified development/runtime environment notes
   legacy/             Historical architecture references
 
@@ -107,6 +100,9 @@ src/
 
 tests/
   fixtures/           Real model outputs used as regression evidence
+
+validation/
+  speech_pipeline_e2e.py  Two-environment real-runtime validation driver
 ```
 
 ## Development Model
