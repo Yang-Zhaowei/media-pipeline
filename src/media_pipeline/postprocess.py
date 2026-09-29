@@ -367,6 +367,19 @@ def postprocess_speech(
     except OSError as exc:
         raise
 
+    # The alignment must be a JSON array at the top level. A well-formed JSON
+    # value of the wrong shape (``null``, a number, an object, ...) is a
+    # deterministic validation failure, not a filesystem I/O fault and not a
+    # program bug, so reject it here up front as an isolatable per-segment
+    # failure rather than letting ``parse_alignment`` raise an unclassified
+    # ``TypeError`` while iterating the wrong shape (C5). Do not broaden the
+    # ``parse_alignment`` handler below to ``TypeError``/``Exception``.
+    if not isinstance(raw_alignment, list):
+        raise AudioPostprocessError(
+            f"{alignment_path} must contain a JSON array of alignment items, "
+            f"got {type(raw_alignment).__name__}"
+        )
+
     try:
         tokens = parse_alignment(raw_alignment)
     except AlignmentError as exc:

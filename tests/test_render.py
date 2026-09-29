@@ -1465,6 +1465,55 @@ def test_postprocess_unknown_exception_stops_the_run(tmp_path, monkeypatch):
     assert not (run / "final" / ".complete").exists()
 
 
+# --- C5/Blocker: non-array top-level alignment JSON is an isolatable failure -
+
+
+def test_postprocess_non_array_alignment_is_isolated(tmp_path):
+    """A well-formed JSON of the wrong top-level shape is an isolatable failure.
+
+    ``null``, a number, or an object are all valid JSON, but not a valid
+    alignment array. ``postprocess_speech`` now validates the top level is a
+    list before ``parse_alignment``: a non-list is a deterministic
+    ``AudioPostprocessError`` (``postprocess_failed`` + continue) rather than an
+    unclassified ``TypeError`` that would stop the whole run (C5). ``null`` is
+    the canonical case from the ticket.
+    """
+
+    def non_array_align_task(task: dict) -> dict:
+        seg_dir = Path(task["run_dir"]) / "segments"
+        results = []
+        for seg in task["segments"]:
+            raw = seg_dir / (seg["safe_name"] + ".alignment.raw.json")
+            if seg["id"] == "bad":
+                # Valid JSON, but the top level is not an array (null here).
+                raw.write_text("null", encoding="utf-8")
+                results.append({"segment_id": seg["id"], "status": "ok"})
+            else:
+                _, rate, frames = read_wav(seg_dir / (seg["safe_name"] + ".wav"))
+                _write_alignment(raw, seg["text"], frames / rate)
+                results.append({"segment_id": seg["id"], "status": "ok"})
+        return {"runtime_error": None, "segments": results}
+
+    script = _write_script(tmp_path, [_seg("good", "好段。"), _seg("bad", "坏段。")])
+    run = tmp_path / "run"
+    result = render_speech(
+        script,
+        run,
+        tts_python="python",
+        alignment_python="python",
+        tts_model="/m",
+        alignment_model="/m",
+        max_segment_chars=100,
+        _wav_task=FakeTTSEngine(durations={"good": 1.0, "bad": 1.0}),
+        _align_task=non_array_align_task,
+    )
+    assert result.status == STATUS_INCOMPLETE
+    by_id = {s.segment_id: s.status for s in result.segments}
+    assert by_id["good"] == "ok"
+    assert by_id["bad"] == "postprocess_failed"
+    assert not (run / "final").exists()
+
+
 # --- C6: publication / completion-transaction failure injection -------------
 
 
