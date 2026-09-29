@@ -2,14 +2,10 @@
 
 ## Status
 
-**Unmerged work in progress** on branch `feat/segmented-speech-v0`. This entry
-point sits on top of the Speech Pipeline v0 components (Production TTS,
-Production Alignment, Audio Postprocess, Caption Compiler) and is validated on
-CPU by unit tests. **Real ai-core multi-segment validation and human-listening
-acceptance are pending** — see [project state](CURRENT.md).
-
-Do not substitute the PR #5 single-utterance validation for the pending
-multi-segment validation.
+**Unmerged PR #7**, reviewed at `f34f47a`. The real ai-core multi-segment run,
+load-once instrumentation and recorded human acceptance are complete. A narrow
+C3 preflight defect remains; see the [acceptance review](../validation/segmented-speech-v0-acceptance.md)
+and [project state](../CURRENT.md). These are separate from PR #5 evidence.
 
 ## Purpose
 
@@ -30,7 +26,7 @@ render_speech(
 )
 ```
 
-It is **not** a full-manuscript interface. Automatic long-script splitting (ASR),
+It is **not** a full-manuscript interface. Automatic long-script splitting,
 full-manuscript authoring, and exact numeric speed/pitch control are out of
 scope. Each `segment` already carries its `text`, `id`, and `pause_after_ms`.
 
@@ -44,10 +40,10 @@ scope. Each `segment` already carries its `text`, `id`, and `pause_after_ms`.
 
 Internal seams (injected in tests, real in production):
 
-- `device`: which model to load per stage (CPU / CUDA).
+- `device`: runtime device; the recorded real validation used `cuda:0`.
 - `_wav_task` / `_align_task`: the two one-shot stage callables. Production
-  code never imports `torch`, the TTS/Alignment runtimes, or `tests/` at
-  runtime; those imports happen lazily inside the stage subprocesses.
+  parent imports stay portable; model-runtime imports happen inside the stage
+  subprocesses. Production code does not depend on `tests/`.
 
 ## Lifecycle
 
@@ -55,8 +51,8 @@ One model load per stage, run once as separate subprocesses:
 
 ```
 TTS stage (subprocess, one model load)   → per-segment raw WAVs + manifest
-Alignment stage (subprocess, one load)   → per-segment raw/adjusted alignment
-Audio Postprocess + Caption Compiler     (in-process, deterministic)
+Alignment stage (subprocess, one load)   → per-segment raw alignment
+Audio Postprocess + Caption Compiler     → cleaned WAV + adjusted alignment + captions
 Integer-frame assembly + SRT             (in-process, deterministic)
 ```
 
@@ -71,9 +67,9 @@ No per-segment model lifecycle and never two models resident in one process.
   subprocess faults, TTS synthesis failures, invalid segment WAVs, sample-rate
   mismatch, and the final product verification failure. No catch-all continue.
 - **Per-segment deterministic faults** (alignment, postprocess, caption) are
-  recorded with `segment_id`/`stage`/`reason` and skipped; other segments still
-  publish. A run with any such fault produces a **partial** run — no complete
-  episode is published.
+  recorded with `segment_id`/`stage`/`reason`; independent segments continue.
+  The result is `incomplete`, with intermediate artifacts retained and all
+  final paths `None`. No shortened episode or successful-episode groups publish.
 - A failed run never leaves a valid `.complete` marker; a completed run writes
   `.complete` last.
 
@@ -82,27 +78,27 @@ No per-segment model lifecycle and never two models resident in one process.
 - Integer-frame accumulation: `O_i = Σ (N_j + G_j)` for `j < i`, with
   `G_i = half_up(pause_after_ms_i · R / 1000)`.
 - Global caption time = local caption time + `O_i / R`.
-- Only the raw WAV **data frames** are concatenated; the header is rewritten for
+- Only the cleaned WAV **data frames** are concatenated; the header is rewritten for
   the assembled length and sample rate. SRT is rendered only at the end with the
   existing half-up rules.
-- No drift tolerance beyond 0.5 ms + a single float.
+- Millisecond SRT endpoints allow at most 0.5 ms rounding plus floating-point
+  tolerance beyond the audio boundary; offsets accumulate integer frames.
 
 ## Output layout (contract C6)
 
 ```
 run_dir/
-  request.json          validated input (verbatim)
+  request.json          validated request values, with defaults materialized
   report.json           manifest of segment statuses
   segments/<name>.wav                 per-segment raw WAV
   segments/<name>.alignment.raw.json
   segments/<name>.alignment.adjusted.json
   segments/<name>.cleaned.wav
-  final/                published only after validation
+  .final.staging/        staged WAV/SRT/timeline, re-read before publication
+  final/                artifacts copied after staging validation
     final.wav
     final.srt
     timeline.json
-    report.json
-    .final.staging      staging marker
     .complete           completion marker, written last
 ```
 
@@ -113,4 +109,8 @@ with two injectable fake model engines, covering the C1–C9 checklist: lifecycl
 load-once, alignment-failed-continue, runtime-fault-stop, timeline/frame
 accuracy, accumulation drift, sample-rate mismatch, zero/overlap/past captions,
 original-WAV preservation, output-directory refusal, and marker discipline.
-Pure-logic unit tests run without CUDA; real GPU validation is pending.
+Pure-logic unit tests run without CUDA. At `f34f47a`, the local full suite passed
+287 tests with six gated GPU skips (54 render tests included). The ai-core
+evidence at `8df5262` and its applicability to the metadata-only follow-up are
+recorded in the acceptance review. A successful report and `final/.complete`
+are required: an interrupted publication can leave unfinished files in `final/`.

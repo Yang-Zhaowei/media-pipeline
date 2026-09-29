@@ -42,7 +42,7 @@ voices and scripts need their own listening check.
 `render_speech(...)` renders a **pre-segmented** script (a fixed script with
 fixed segments/speaker) to a single episode WAV + SRT in one synchronous
 call; see [render entry-point docs](docs/dev/render-entry-point.md). It is not
-a full-manuscript interface: there is no automatic long-script splitting (ASR),
+a full-manuscript interface: there is no automatic long-script splitting,
 no full-manuscript entry point, and no exact numeric speed / pitch control.
 Voice cloning and VoiceDesign are not implemented. `python -m media_pipeline`
 only compiles existing text and alignment into SRT.
@@ -55,9 +55,12 @@ see [validation instructions](validation/README.md).
 For a chapter-based podcast video, see the
 [first-production workflow assessment](docs/workflows/podcast-pilot.md).
 
-`render_speech(...)` is an unmerged work-in-progress entry point; see
-[project state](docs/CURRENT.md) for its pending ai-core and human-listening
-acceptance before it is promoted to a shipped capability.
+`render_speech(...)` is unmerged PR #7. Real ai-core multi-segment generation,
+load-once instrumentation, and recorded human acceptance are complete. Final
+acceptance at `f34f47a` still requires a narrow input-preflight correction;
+see the [acceptance review](docs/validation/segmented-speech-v0-acceptance.md).
+Identical voice/instruction settings do not guarantee identical emotion or
+prosody across independently generated segments.
 
 ## Design Direction
 
