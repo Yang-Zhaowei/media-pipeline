@@ -1492,6 +1492,24 @@ try:
             _dump({"runtime_error": f"alignment runtime failure on segment {seg['id']!r}: {exc}",
                    "segments": results})
             sys.exit(2)
+        except OSError as exc:
+            # Writing THIS segment's alignment output raised an I/O fault
+            # (the runtime adapter re-raises OSError from the output write). A
+            # run-level filesystem failure: preserve the current segment id and
+            # the already-completed prior results, do not isolate it as an
+            # alignment_failed, and exit non-zero (C5).
+            _dump({"runtime_error": f"alignment output I/O failure on segment {seg['id']!r}: {exc}",
+                   "segments": results})
+            sys.exit(2)
+        except Exception as exc:  # noqa: BLE001 - unclassified run-level failure
+            # Any other unclassified failure at the segment boundary (a
+            # model/runtime bug) is a run-level fault, not an isolatable
+            # validation error. Keep the current segment id, stage/reason and
+            # the already-completed prior results so no context is lost, and
+            # stop the run (C5).
+            _dump({"runtime_error": f"alignment runtime failure on segment {seg['id']!r}: {exc}",
+                   "segments": results})
+            sys.exit(2)
 
         results.append({"segment_id": seg["id"], "status": "ok"})
 

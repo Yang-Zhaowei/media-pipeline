@@ -1042,6 +1042,171 @@ sys.exit(0)
     ]
 
 
+# --- Blocker 2: real embedded Alignment stage preserves context on fault ----
+
+
+def _run_real_align_stage(sys_executable: str, stage: str, task: dict) -> dict:
+    """Run the genuine embedded ``_ALIGN_STAGE_SCRIPT`` on CPU via a fake aligner.
+
+    A fake ``media_pipeline.runtimes.qwen_aligner`` is preloaded into
+    ``sys.modules`` so the production ``Qwen3ForcedAlignment`` import inside the
+    real stage script resolves to it, then the real ``_ALIGN_STAGE_SCRIPT`` is
+    executed verbatim. This exercises the real embedded Alignment stage protocol
+    and its production fault classification (Blocker 2) without torch/qwen_asr.
+    """
+
+    bootstrap = (
+        "import sys, types\n"
+        "fake = types.ModuleType('media_pipeline.runtimes.qwen_aligner')\n"
+        "__engine__\n"
+        "fake.Qwen3ForcedAlignment = FakeAligner\n"
+        "sys.modules['media_pipeline.runtimes.qwen_aligner'] = fake\n"
+        "from media_pipeline.render import _ALIGN_STAGE_SCRIPT\n"
+        "exec(compile(_ALIGN_STAGE_SCRIPT, '<real align stage>', 'exec'))\n"
+    ).replace("__engine__", stage)
+
+    return _run_model_stage(sys_executable, bootstrap, ("model", task))
+
+
+def test_alignment_output_io_failure_stops_run_first_segment(tmp_path):
+    """A bare OSError from THIS segment's alignment output write stops the run
+    while keeping the segment id and reason (Blocker 2).
+
+    The production ``Qwen3ForcedAlignment.align()`` re-raises ``OSError`` from
+    the output write; the real embedded stage must treat it as a run-level fault
+    rather than dropping the segment context into the outer guard.
+    """
+
+    import sys
+
+    engine = r"""
+class FakeAligner:
+    def __init__(self, model_path, *, device="cuda:0"):
+        pass
+    def align(self, request, output_path):
+        raise OSError("disk full writing alignment output")
+"""
+    task = {
+        "run_dir": str(tmp_path),
+        "language": "Chinese",
+        "segments": [{"id": "only", "safe_name": "s", "text": "一段。"}],
+    }
+    result = _run_real_align_stage(sys.executable, engine, task)
+    assert result["runtime_error"]
+    assert "only" in result["runtime_error"]
+    assert "disk full" in result["runtime_error"]
+    # No segment completed before the I/O fault; nothing is reported as ok.
+    assert result["segments"] == []
+    assert result["runtime_error"].startswith("alignment output I/O failure")
+
+
+def test_alignment_output_io_failure_preserves_prior_results(tmp_path):
+    """An output I/O fault on a later segment preserves the completed prior
+    results and the current segment id (Blocker 2)."""
+
+    import sys
+
+    engine = r"""
+import json
+
+class FakeAligner:
+    _calls = 0
+    def __init__(self, model_path, *, device="cuda:0"):
+        pass
+    def align(self, request, output_path):
+        FakeAligner._calls += 1
+        if FakeAligner._calls >= 2:
+            raise OSError("disk full writing alignment output")
+        output_path.write_text(
+            json.dumps([{"text": "x", "start": 0.1, "end": 0.2}]),
+            encoding="utf-8",
+        )
+"""
+    task = {
+        "run_dir": str(tmp_path),
+        "language": "Chinese",
+        "segments": [
+            {"id": "first", "safe_name": "first.aaaaaaa", "text": "第一段。"},
+            {"id": "second", "safe_name": "second.bbbbbbbb", "text": "第二段。"},
+        ],
+    }
+    result = _run_real_align_stage(sys.executable, engine, task)
+    assert "second" in result["runtime_error"]
+    assert "disk full" in result["runtime_error"]
+    # The already-completed first segment is preserved, not lost to [].
+    assert result["segments"] == [{"segment_id": "first", "status": "ok"}]
+
+
+def test_alignment_unclassified_failure_preserves_segment_context(tmp_path):
+    """An unclassified failure at the segment boundary is a run-level fault that
+    keeps the current segment id and prior results (Blocker 2)."""
+
+    import sys
+
+    engine = r"""
+import json
+
+class FakeAligner:
+    _calls = 0
+    def __init__(self, model_path, *, device="cuda:0"):
+        pass
+    def align(self, request, output_path):
+        FakeAligner._calls += 1
+        if FakeAligner._calls >= 2:
+            raise ValueError("unclassified model bug")
+        output_path.write_text(
+            json.dumps([{"text": "x", "start": 0.1, "end": 0.2}]),
+            encoding="utf-8",
+        )
+"""
+    task = {
+        "run_dir": str(tmp_path),
+        "language": "Chinese",
+        "segments": [
+            {"id": "first", "safe_name": "first.aaaaaaa", "text": "第一段。"},
+            {"id": "second", "safe_name": "second.bbbbbbbb", "text": "第二段。"},
+        ],
+    }
+    result = _run_real_align_stage(sys.executable, engine, task)
+    assert result["runtime_error"]
+    assert "second" in result["runtime_error"]
+    assert result["segments"] == [{"segment_id": "first", "status": "ok"}]
+    # Not converted into an isolatable segment failure.
+    assert result["runtime_error"].startswith("alignment runtime failure")
+
+
+def test_alignment_deterministic_validation_still_continues(tmp_path):
+    """A deterministic validation failure still isolates and continues (no
+    regression: the new handlers only add run-level fault handling)."""
+
+    import sys
+
+    engine = r"""
+import json
+
+class FakeAligner:
+    def __init__(self, model_path, *, device="cuda:0"):
+        pass
+    def align(self, request, output_path):
+        # A genuine alignment validation failure is a text mismatch.
+        from media_pipeline.captions import AlignmentMismatchError
+        raise AlignmentMismatchError("aligned text does not match the script")
+"""
+    task = {
+        "run_dir": str(tmp_path),
+        "language": "Chinese",
+        "segments": [
+            {"id": "good", "safe_name": "good.aaaaaaaa", "text": "好段。"},
+        ],
+    }
+    result = _run_real_align_stage(sys.executable, engine, task)
+    assert result["runtime_error"] is None
+    assert result["segments"] == [
+        {"segment_id": "good", "status": "alignment_failed",
+         "reason": "aligned text does not match the script"}
+    ]
+
+
 # --- helpers ---------------------------------------------------------------
 
 
@@ -1215,6 +1380,84 @@ def test_postprocess_missing_alignment_io_stops_the_run(tmp_path):
             max_segment_chars=100,
             _wav_task=FakeTTSEngine(durations={"good": 1.0, "bad": 1.0}),
             _align_task=missing_align_task,
+        )
+    assert excinfo.value.run_dir == run
+    report = json.loads((run / "report.json").read_text(encoding="utf-8"))
+    assert report["status"] == STATUS_FAILED
+    assert not (run / "final" / ".complete").exists()
+
+
+# --- Blocker 1: postprocess exception classification ------------------------
+
+
+def test_postprocess_speech_wraps_only_alignment_validation(tmp_path, monkeypatch):
+    """postprocess_speech wraps only deterministic alignment validation (Blocker 1).
+
+    The real :func:`media_pipeline.postprocess.postprocess_speech` is exercised
+    end to end: ``parse_alignment`` is replaced so we can prove the exception
+    classification. A program/unknown bug must propagate unchanged, while the
+    deterministic alignment validation failure becomes the isolatable
+    ``AudioPostprocessError``.
+    """
+
+    import media_pipeline.postprocess as pp
+    from media_pipeline.captions import AlignmentError
+
+    wav = tmp_path / "a.wav"
+    write_wav(wav, _waveform(24000), SAMPLE_RATE)
+    align = tmp_path / "a.alignment.raw.json"
+    align.write_text("[]", encoding="utf-8")
+    out_wav = tmp_path / "clean.wav"
+    out_align = tmp_path / "clean.alignment.json"
+
+    # A program/unknown bug must propagate out of postprocess_speech and never be
+    # mis-classified as an isolatable AudioPostprocessError.
+    def unknown(items):  # noqa: ARG005
+        raise RuntimeError("unexpected internal error")
+
+    monkeypatch.setattr(pp, "parse_alignment", unknown)
+    with pytest.raises(RuntimeError, match="unexpected internal error"):
+        pp.postprocess_speech(wav, align, out_wav, out_align)
+
+    # The deterministic alignment validation failure IS wrapped into the
+    # isolatable per-segment AudioPostprocessError.
+    def bad_align(items):  # noqa: ARG005
+        raise AlignmentError("overlapping alignment is unusable")
+
+    monkeypatch.setattr(pp, "parse_alignment", bad_align)
+    with pytest.raises(pp.AudioPostprocessError, match="unusable"):
+        pp.postprocess_speech(wav, align, out_wav, out_align)
+
+
+def test_postprocess_unknown_exception_stops_the_run(tmp_path, monkeypatch):
+    """An unknown exception inside the real postprocess_speech stops the whole run.
+
+    Goes through the real ``render -> _run_postprocess_stage -> postprocess_speech``
+    call chain: ``parse_alignment`` (patched to raise a non-validation
+    ``RuntimeError``) is used by the real ``postprocess_speech``, whose
+    ``except AudioPostprocessError`` in the orchestrator must not swallow it, so
+    the run stops (C5).
+    """
+
+    import media_pipeline.postprocess as pp
+
+    def unknown(items):  # noqa: ARG005
+        raise RuntimeError("unexpected internal error")
+
+    monkeypatch.setattr(pp, "parse_alignment", unknown)
+    script = _write_script(tmp_path, [_seg("a", "一段。"), _seg("b", "两段。")])
+    run = tmp_path / "run"
+    with pytest.raises(RenderError) as excinfo:
+        render_speech(
+            script,
+            run,
+            tts_python="python",
+            alignment_python="python",
+            tts_model="/m",
+            alignment_model="/m",
+            max_segment_chars=100,
+            _wav_task=FakeTTSEngine(durations={"a": 1.0, "b": 1.0}),
+            _align_task=FakeAlignerEngine(),
         )
     assert excinfo.value.run_dir == run
     report = json.loads((run / "report.json").read_text(encoding="utf-8"))

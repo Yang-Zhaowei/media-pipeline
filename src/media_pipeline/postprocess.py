@@ -38,7 +38,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Sequence
 
-from .captions import AlignedToken, parse_alignment
+from .captions import AlignedToken, AlignmentError, parse_alignment
 
 __all__ = [
     "DEFAULT_FADE_IN",
@@ -369,7 +369,13 @@ def postprocess_speech(
 
     try:
         tokens = parse_alignment(raw_alignment)
-    except Exception as exc:  # captions raises AlignmentError; treat as unusable
+    except AlignmentError as exc:
+        # Only the deterministic alignment validation failure (malformed,
+        # overlapping, or text-mismatched alignment) is an isolatable
+        # per-segment fault (C5). Any other exception -- a RuntimeError, a
+        # TypeError, or some other program/runtime bug -- must propagate as a
+        # run-level failure and never be mis-classified as an isolatable
+        # segment failure.
         raise AudioPostprocessError(str(exc)) from exc
 
     # Always compute the plan from this WAV and alignment: a plan built for a
