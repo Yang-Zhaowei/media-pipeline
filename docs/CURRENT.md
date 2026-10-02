@@ -159,6 +159,27 @@ See the [acceptance review](validation/segmented-speech-v0-acceptance.md),
 
 ## Next
 
+### Issue #8 — per-segment performance-unit instructions (in progress)
+
+The caller (including an upper-level Agent) defines coherent performance units;
+one speech segment may contain multiple sentences and is one TTS request. The
+caller also chooses where explicit directing is needed. Ordinary narration uses
+an omitted or empty instruction, without boilerplate direction. Optional
+segment-level instructions inherit, clear, or override the top-level value as
+defined in [the Issue #8 contract](contracts/performance-unit-instruct.md).
+Alignment and the Caption Compiler continue to determine subtitle boundaries
+independently.
+
+The production change is under review and has CPU validation scope only.
+ai-core GPU validation: pending owner
+
+human listening acceptance: pending owner
+
+Both are merge gates. PR #7 acceptance remains historical evidence and does not
+resolve Issue #8. Do not claim acoustic continuity from CPU checks. Keep the
+podcast pilot boundary below: this contract does not authorize automatic
+segmentation or broader workflow features.
+
 Evaluate one real chapter-based podcast production, including a script revision
 and final video export; see the [workflow assessment](workflows/podcast-pilot.md).
 The agent supplies the segmented manuscript; external tools supply HTML slides,

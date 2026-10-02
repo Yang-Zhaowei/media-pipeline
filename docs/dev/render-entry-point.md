@@ -2,10 +2,11 @@
 
 ## Status
 
-`render_speech` is the merged pre-segmented render entry point (PR #7). The real
-ai-core multi-segment run, load-once instrumentation and recorded human
-acceptance are complete; see the [acceptance review](../validation/segmented-speech-v0-acceptance.md)
-and [project state](../CURRENT.md). These records are separate from PR #5 evidence.
+`render_speech` is the merged pre-segmented render entry point (PR #7). PR #7's
+real ai-core multi-segment run, load-once instrumentation and recorded human
+acceptance are historical evidence; see the [acceptance review](../validation/segmented-speech-v0-acceptance.md)
+and [project state](../CURRENT.md). Issue #8's per-segment instruction change
+has separate pending ai-core GPU and human listening merge gates.
 
 ## Purpose
 
@@ -28,7 +29,39 @@ render_speech(
 
 It is **not** a full-manuscript interface. Automatic long-script splitting,
 full-manuscript authoring, and exact numeric speed/pitch control are out of
-scope. Each `segment` already carries its `text`, `id`, and `pause_after_ms`.
+scope. The caller (including an upper-level Agent) approves coherent performance
+units and decides where explicit direction is needed. Each `segment` is one
+unit, may contain multiple sentences, and produces one TTS request. Subtitle
+segmentation remains independent and is determined by Alignment and the Caption
+Compiler.
+
+Top-level `instruct` remains optional and defaults to `""`. For ordinary
+narration, omit it or set it to `""`; do not add a boilerplate style
+instruction. Use an instruction only as an explicit
+directing signal for a requested emotion, emphasis, contrast, or performance
+change. The top-level instruction remains available for whole-render direction.
+An omitted segment instruction inherits that top-level value, including its
+empty default; explicit `""` clears inherited direction, and a non-empty string
+overrides it. Presence controls resolution, so empty strings are meaningful and
+strings are passed verbatim. Non-string values, including `null`, are rejected.
+
+```json
+{
+  "language": "Chinese",
+  "speaker": "Uncle_Fu",
+  "instruct": "开场时带有克制的紧迫感。",
+  "segments": [
+    {"id": "opening", "text": "欢迎收听本期节目。今天我们讨论一个具体问题。"},
+    {"id": "plain", "text": "接下来回到普通叙述。", "instruct": ""},
+    {"id": "emphasis", "text": "这个结论值得关注。", "instruct": "强调最后一句。"}
+  ]
+}
+```
+
+In the example, `opening` inherits the top-level direction, `plain` explicitly
+clears it, and `emphasis` supplies a local direction. Omitting the top-level
+field is equivalent to its default `""` and is the recommended ordinary
+narration input.
 
 ## Inputs
 
@@ -44,6 +77,16 @@ Internal seams (injected in tests, real in production):
 - `_wav_task` / `_align_task`: the two one-shot stage callables. Production
   parent imports stay portable; model-runtime imports happen inside the stage
   subprocesses. Production code does not depend on `tests/`.
+
+## Instruction request and report fields
+
+`request.json` records the normalized top-level `instruct` default. A segment's
+`instruct` is recorded only when the caller explicitly supplied it, preserving
+the distinction between inheritance and explicit clearing. `report.json`
+records each segment's `effective_instruct` and `instruct_source` (`segment` or
+`top_level`); the latter also identifies use of the empty top-level default.
+These fields describe resolved request provenance, not proof of audible model
+delivery. Unknown fields remain rejected.
 
 ## Lifecycle
 
@@ -104,13 +147,16 @@ run_dir/
 
 ## Testing
 
-`tests/test_render.py` exercises the full deterministic path on CPU (no CUDA)
-with two injectable fake model engines, covering the C1–C9 checklist: lifecycle
-load-once, alignment-failed-continue, runtime-fault-stop, timeline/frame
-accuracy, accumulation drift, sample-rate mismatch, zero/overlap/past captions,
-original-WAV preservation, output-directory refusal, and marker discipline.
-Pure-logic unit tests run without CUDA; the local full suite passes with only
-six gated GPU skips (including 54 render tests). The ai-core generation, load-once
-instrumentation and human acceptance are recorded in the acceptance review. A
-successful report and `final/.complete` are required: an interrupted publication
-can leave unfinished files in `final/`.
+`tests/test_render.py` exercises the deterministic render path on CPU (no CUDA)
+with injectable fake model engines, including lifecycle, failure, timeline,
+caption, output-directory, and completion-marker behavior. PR #7's ai-core
+generation, load-once instrumentation, and human acceptance are historical
+evidence in the [acceptance review](../validation/segmented-speech-v0-acceptance.md).
+For Issue #8, the current focused and full CPU validation results are recorded
+in the PR body; CPU checks do not establish audible delivery. A successful
+report and `final/.complete` are required: an interrupted publication can leave
+unfinished files in `final/`.
+
+**ai-core GPU validation: pending owner** and **human listening acceptance:
+pending owner**; both are merge gates. PR #7's historical acceptance does not
+satisfy them.

@@ -33,10 +33,16 @@ See [`docs/CURRENT.md`](docs/CURRENT.md) for the current project state.
 
 ## What is usable today
 
-The Python production interfaces accept one already-segmented utterance with
-`text`, `language`, a model-supported `speaker`, and an optional natural-language
-`instruct` describing delivery. The stages produce a mono PCM16 WAV and matching
-SRT. Only the recorded Chinese / `Uncle_Fu` case has full E2E acceptance; other
+The Python production interfaces accept caller-authored speech segments with
+`text`, `language`, a model-supported `speaker`, and an optional `instruct`.
+Each segment is one caller-approved performance unit and may contain multiple
+sentences; it is sent as one TTS request. The caller (including an upper-level
+Agent) chooses the unit boundaries and any directing signals. For ordinary
+narration, omit `instruct` or use `""`; do not add boilerplate direction.
+Segment instructions can inherit, clear, or override the top-level instruction;
+see the [render entry-point docs](docs/dev/render-entry-point.md). Alignment and
+the Caption Compiler continue to determine subtitle boundaries independently.
+Only the recorded Chinese / `Uncle_Fu` case has full E2E acceptance; other
 voices and scripts need their own listening check.
 
 `render_speech(...)` renders a **pre-segmented** script (a fixed script with
@@ -55,10 +61,12 @@ see [validation instructions](validation/README.md).
 For a chapter-based podcast video, see the
 [first-production workflow assessment](docs/workflows/podcast-pilot.md).
 
-Real ai-core multi-segment generation, load-once instrumentation, and recorded
-human acceptance are complete; see the [acceptance review](docs/validation/segmented-speech-v0-acceptance.md).
-Identical voice/instruction settings do not guarantee identical emotion or
-prosody across independently generated segments.
+PR #7's real ai-core multi-segment generation, load-once instrumentation, and
+recorded human acceptance remain historical evidence; see the
+[acceptance review](docs/validation/segmented-speech-v0-acceptance.md). Issue #8
+adds a separate production contract for per-segment direction. Its ai-core GPU
+validation and human listening acceptance are pending owner and are merge gates;
+CPU checks do not establish acoustic continuity or resolve Issue #8.
 
 ## Design Direction
 

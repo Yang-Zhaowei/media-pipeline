@@ -112,7 +112,7 @@ _SEG_SYNTHESIS_FAILED = "synthesis_failed"
 # Fields allowed in the top-level request and in each segment. Unknown fields are
 # rejected so a voice/time parameter typo cannot be silently ignored.
 _TOP_LEVEL_KEYS = frozenset({"language", "speaker", "instruct", "segments"})
-_SEGMENT_KEYS = frozenset({"id", "text", "pause_after_ms"})
+_SEGMENT_KEYS = frozenset({"id", "text", "pause_after_ms", "instruct"})
 
 
 class RenderError(Exception):
@@ -133,11 +133,16 @@ class RenderError(Exception):
 
 @dataclass(frozen=True)
 class ValidatedSegment:
-    """One validated input segment, passed verbatim to the production stages."""
+    """One caller-approved performance unit, possibly containing many sentences.
+
+    ``instruct=None`` represents an omitted override, never JSON ``null``.
+    An explicit empty string clears inherited top-level direction.
+    """
 
     id: str
     text: str
     pause_after_ms: int
+    instruct: str | None = None
 
 
 @dataclass(frozen=True)
@@ -284,6 +289,7 @@ def _validate_script_data(
                     id=str(seg["id"]),
                     text=str(seg["text"]),
                     pause_after_ms=int(seg.get("pause_after_ms", 0)),
+                    instruct=seg.get("instruct"),
                 )
                 for seg in segments_list
             ],
@@ -333,6 +339,9 @@ def _validate_segments(
             errors.append(f"{where}.pause_after_ms must be a non-negative integer")
         elif pause < 0:
             errors.append(f"{where}.pause_after_ms must not be negative")
+
+        if "instruct" in segment and not isinstance(segment["instruct"], str):
+            errors.append(f"{where}.instruct must be a string when present")
 
         if segment_id is not None:
             if segment_id in seen_ids:
@@ -493,7 +502,13 @@ def render_speech(
         )
 
     segments = [
-        {"id": seg.id, "text": seg.text, "pause_after_ms": seg.pause_after_ms}
+        {
+            "id": seg.id,
+            "text": seg.text,
+            "pause_after_ms": seg.pause_after_ms,
+            "effective_instruct": script.instruct if seg.instruct is None else seg.instruct,
+            "instruct_source": "top_level" if seg.instruct is None else "segment",
+        }
         for seg in script.segments
     ]
     safe_names = {seg.id: _safe_name(seg.id) for seg in script.segments}
@@ -514,8 +529,14 @@ def render_speech(
         },
         completed_stages=[],
         segments=[
-            {"segment_id": seg.id, "text": seg.text, "status": "pending"}
-            for seg in script.segments
+            {
+                "segment_id": seg["id"],
+                "text": seg["text"],
+                "effective_instruct": seg["effective_instruct"],
+                "instruct_source": seg["instruct_source"],
+                "status": "pending",
+            }
+            for seg in segments
         ],
         artifacts={},
     )
@@ -534,6 +555,7 @@ def render_speech(
                             "id": seg.id,
                             "text": seg.text,
                             "pause_after_ms": seg.pause_after_ms,
+                            **({"instruct": seg.instruct} if seg.instruct is not None else {}),
                         }
                         for seg in script.segments
                     ],
@@ -620,7 +642,12 @@ def _run_tts_stage(
         "instruct": script.instruct,
         "device": device,
         "segments": [
-            {"id": seg["id"], "safe_name": safe_names[seg["id"]], "text": seg["text"]}
+            {
+                "id": seg["id"],
+                "safe_name": safe_names[seg["id"]],
+                "text": seg["text"],
+                "instruct": seg["effective_instruct"],
+            }
             for seg in segments
         ],
     }
@@ -1392,7 +1419,7 @@ try:
                     text=seg["text"],
                     language=task_dict["language"],
                     speaker=task_dict["speaker"],
-                    instruct=task_dict.get("instruct", ""),
+                    instruct=seg["instruct"],
                 ),
                 out_wav,
             )
