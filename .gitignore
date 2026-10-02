@@ -10,3 +10,6 @@ dist/
 build/
 .env
 .env.*
+# Issue #8 experiment large audio artifacts: configured externally, never committed.
+issue8-results/
+validation/issue8/results/

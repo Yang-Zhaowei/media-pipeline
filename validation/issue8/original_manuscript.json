@@ -1,0 +1,26 @@
+{
+  "schema": "issue8-frozen-manuscript-v1",
+  "note": "Frozen original narration manuscript for Issue #8. No original failure manuscript or original instruction was found in the repository, so this is newly authored narration intended for real listening comparison. It is NEW experiment material and CANNOT alone be used to claim reproduction of the original problem.",
+  "language": "Chinese",
+  "speaker": "Uncle_Fu",
+  "original_instruct": "自然、清晰、克制的中文旁白，语速中等，不要夸张。",
+  "common_pause_after_ms": 600,
+  "max_segment_chars": 60,
+  "paragraphs": [
+    [
+      "冬天到了，湖面的水渐渐结冰。",
+      "清晨的阳光照在冰上，反射出淡淡的白光。",
+      "孩子们在岸边扔下石子，看着冰面泛起涟漪。"
+    ],
+    [
+      "山上的树木换上了深色的外衣。",
+      "风穿过树林，发出低沉而连续的声音。",
+      "一只松鼠抱着松果，从一根低枝跳到另一根。"
+    ],
+    [
+      "夜晚降临，屋子里亮起了温暖的灯。",
+      "炉火跳动，把一家人的影子投在墙上。",
+      "窗外很安静，只有偶尔的犬吠打破夜色。"
+    ]
+  ]
+}

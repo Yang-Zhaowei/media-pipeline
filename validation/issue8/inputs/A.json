@@ -1,0 +1,52 @@
+{
+  "language": "Chinese",
+  "speaker": "Uncle_Fu",
+  "instruct": "自然、清晰、克制的中文旁白，语速中等，不要夸张。",
+  "segments": [
+    {
+      "id": "sp-01",
+      "text": "冬天到了，湖面的水渐渐结冰。",
+      "pause_after_ms": 0
+    },
+    {
+      "id": "sp-02",
+      "text": "清晨的阳光照在冰上，反射出淡淡的白光。",
+      "pause_after_ms": 0
+    },
+    {
+      "id": "sp-03",
+      "text": "孩子们在岸边扔下石子，看着冰面泛起涟漪。",
+      "pause_after_ms": 600
+    },
+    {
+      "id": "sp-04",
+      "text": "山上的树木换上了深色的外衣。",
+      "pause_after_ms": 0
+    },
+    {
+      "id": "sp-05",
+      "text": "风穿过树林，发出低沉而连续的声音。",
+      "pause_after_ms": 0
+    },
+    {
+      "id": "sp-06",
+      "text": "一只松鼠抱着松果，从一根低枝跳到另一根。",
+      "pause_after_ms": 600
+    },
+    {
+      "id": "sp-07",
+      "text": "夜晚降临，屋子里亮起了温暖的灯。",
+      "pause_after_ms": 0
+    },
+    {
+      "id": "sp-08",
+      "text": "炉火跳动，把一家人的影子投在墙上。",
+      "pause_after_ms": 0
+    },
+    {
+      "id": "sp-09",
+      "text": "窗外很安静，只有偶尔的犬吠打破夜色。",
+      "pause_after_ms": 0
+    }
+  ]
+}

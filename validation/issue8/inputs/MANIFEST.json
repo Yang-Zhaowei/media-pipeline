@@ -1,0 +1,132 @@
+{
+  "source": "validation\\issue8\\original_manuscript.json",
+  "generated_by": "make_inputs.py",
+  "shared_concatenated_text": "冬天到了，湖面的水渐渐结冰。清晨的阳光照在冰上，反射出淡淡的白光。孩子们在岸边扔下石子，看着冰面泛起涟漪。山上的树木换上了深色的外衣。风穿过树林，发出低沉而连续的声音。一只松鼠抱着松果，从一根低枝跳到另一根。夜晚降临，屋子里亮起了温暖的灯。炉火跳动，把一家人的影子投在墙上。窗外很安静，只有偶尔的犬吠打破夜色。",
+  "shared_text_sha256": "35095e0377c37ad280d86211c209709caa6c8e97d1fd4816301a2550845f89ea",
+  "cases": {
+    "A": {
+      "boundary": "short",
+      "instruct_policy": "instruct",
+      "unit_count": 9,
+      "instruct_present": true
+    },
+    "B": {
+      "boundary": "short",
+      "instruct_policy": "empty",
+      "unit_count": 9,
+      "instruct_present": false
+    },
+    "C": {
+      "boundary": "long",
+      "instruct_policy": "instruct",
+      "unit_count": 3,
+      "instruct_present": true
+    },
+    "D": {
+      "boundary": "long",
+      "instruct_policy": "empty",
+      "unit_count": 3,
+      "instruct_present": false
+    }
+  },
+  "junction_mapping": {
+    "sentences": [
+      "冬天到了，湖面的水渐渐结冰。",
+      "清晨的阳光照在冰上，反射出淡淡的白光。",
+      "孩子们在岸边扔下石子，看着冰面泛起涟漪。",
+      "山上的树木换上了深色的外衣。",
+      "风穿过树林，发出低沉而连续的声音。",
+      "一只松鼠抱着松果，从一根低枝跳到另一根。",
+      "夜晚降临，屋子里亮起了温暖的灯。",
+      "炉火跳动，把一家人的影子投在墙上。",
+      "窗外很安静，只有偶尔的犬吠打破夜色。"
+    ],
+    "common_boundaries_after_sentence_index": [
+      3,
+      6
+    ],
+    "short_units": {
+      "sp-01": {
+        "sentences": [
+          "冬天到了，湖面的水渐渐结冰。"
+        ],
+        "boundary_pause_ms": 0
+      },
+      "sp-02": {
+        "sentences": [
+          "清晨的阳光照在冰上，反射出淡淡的白光。"
+        ],
+        "boundary_pause_ms": 0
+      },
+      "sp-03": {
+        "sentences": [
+          "孩子们在岸边扔下石子，看着冰面泛起涟漪。"
+        ],
+        "boundary_pause_ms": 600
+      },
+      "sp-04": {
+        "sentences": [
+          "山上的树木换上了深色的外衣。"
+        ],
+        "boundary_pause_ms": 0
+      },
+      "sp-05": {
+        "sentences": [
+          "风穿过树林，发出低沉而连续的声音。"
+        ],
+        "boundary_pause_ms": 0
+      },
+      "sp-06": {
+        "sentences": [
+          "一只松鼠抱着松果，从一根低枝跳到另一根。"
+        ],
+        "boundary_pause_ms": 600
+      },
+      "sp-07": {
+        "sentences": [
+          "夜晚降临，屋子里亮起了温暖的灯。"
+        ],
+        "boundary_pause_ms": 0
+      },
+      "sp-08": {
+        "sentences": [
+          "炉火跳动，把一家人的影子投在墙上。"
+        ],
+        "boundary_pause_ms": 0
+      },
+      "sp-09": {
+        "sentences": [
+          "窗外很安静，只有偶尔的犬吠打破夜色。"
+        ],
+        "boundary_pause_ms": 0
+      }
+    },
+    "long_units": {
+      "pg-1": {
+        "sentences": [
+          "冬天到了，湖面的水渐渐结冰。",
+          "清晨的阳光照在冰上，反射出淡淡的白光。",
+          "孩子们在岸边扔下石子，看着冰面泛起涟漪。"
+        ],
+        "boundary_pause_ms": 600
+      },
+      "pg-2": {
+        "sentences": [
+          "山上的树木换上了深色的外衣。",
+          "风穿过树林，发出低沉而连续的声音。",
+          "一只松鼠抱着松果，从一根低枝跳到另一根。"
+        ],
+        "boundary_pause_ms": 600
+      },
+      "pg-3": {
+        "sentences": [
+          "夜晚降临，屋子里亮起了温暖的灯。",
+          "炉火跳动，把一家人的影子投在墙上。",
+          "窗外很安静，只有偶尔的犬吠打破夜色。"
+        ],
+        "boundary_pause_ms": 0
+      }
+    }
+  },
+  "consistency_problems": []
+}

@@ -1,0 +1,21 @@
+{
+  "_comment": "Copy to config.json and fill in, or set the equivalent environment variables. run.py reads environment variables first; these values are only documentation. Do NOT commit real model paths, tokens, or host paths.",
+  "environment_variables": {
+    "EXPERIMENT_TTS_PYTHON": "/srv/ai/apps/media-pipeline/tts/.venv/Scripts/python.exe",
+    "EXPERIMENT_ALIGNMENT_PYTHON": "/srv/ai/apps/media-pipeline/aligner/.venv/Scripts/python.exe",
+    "EXPERIMENT_TTS_MODEL": "/srv/ai/models/speech/tts/qwen3-tts-12hz-1.7b-customvoice",
+    "EXPERIMENT_ALIGNMENT_MODEL": "/srv/ai/models/speech/asr/qwen3-forced-aligner-0.6b",
+    "EXPERIMENT_DEVICE": "cuda:0",
+    "EXPERIMENT_MAX_SEGMENT_CHARS": 60,
+    "EXPERIMENT_REPEATS": 3,
+    "EXPERIMENT_CASES": "A,B,C,D",
+    "EXPERIMENT_RESULT_ROOT": "C:/Users/zhaowei/src/media-pipeline/issue8-results",
+    "EXPERIMENT_MANUSCRIPT": "validation/issue8/original_manuscript.json",
+    "EXPERIMENT_INPUTS_DIR": "validation/issue8/inputs"
+  },
+  "_notes": [
+    "interpreter/model paths are supplied by the caller and never hard-coded in run.py;",
+    "the defaults above are ai-core examples and must be replaced by the operator;",
+    "EXPERIMENT_RESULT_ROOT defaults to <repo>/issue8-results which is gitignored."
+  ]
+}
