@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import json
 import struct
+import wave
 from pathlib import Path
 
 import pytest
@@ -34,8 +35,8 @@ ALIGNMENT = FIXTURE / "alignment.raw.json"
 
 
 def _frame_rate() -> int:
-    _, frame_rate, _ = read_wav(RAW_WAV)
-    return frame_rate
+    with wave.open(str(RAW_WAV), "rb") as wav:
+        return wav.getframerate()
 
 
 def _read_alignment() -> list[dict]:

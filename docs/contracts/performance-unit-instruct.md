@@ -77,15 +77,20 @@ failed runs; it is not an assertion about the model's audible delivery.
 - Run focused CPU tests and the full CPU regression; do not modify immutable
   fixtures. Fake runtime checks are CPU evidence, not GPU or listening evidence.
 
-Executed on the client for this implementation:
+Executed on the client after CPU test consolidation:
 
 ```text
-.venv/Scripts/python.exe -m pytest tests/test_render.py -o addopts=-ra -q
-73 passed
+.venv/Scripts/python.exe -m pytest tests/test_alignment.py tests/test_audio_postprocess_regression.py tests/test_render.py tests/test_speech_pipeline_e2e_unit.py -o addopts=-ra -q --durations=10
+175 passed in 6.79s
 
-.venv/Scripts/python.exe -m pytest -o addopts=-ra -q
-306 passed, 6 skipped
+.venv/Scripts/python.exe -m pytest -o addopts=-ra -q --durations=25
+290 passed, 6 skipped in 6.94s
 ```
+
+Equivalent successful paths share one execution with their original assertions;
+independent failure injections and the actual subprocess checks remain separate.
+Only immutable synthetic PCM samples are cached, with fresh WAV files per run.
+The current PR body records the before/after counts and local timing comparison.
 
 All six skips are existing gated GPU tests with no runtime configuration. No
 GPU inference or human listening acceptance was performed for this PR.

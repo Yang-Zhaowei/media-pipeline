@@ -535,9 +535,10 @@ def test_align_passes_original_wav_text_and_language(tmp_path, monkeypatch) -> N
     engine = _engine(monkeypatch, aligner)
 
     wav = _pcm_wav(tmp_path / "u.wav", frames=24000)
-    engine.align(
+    out = tmp_path / "a.json"
+    artifact = engine.align(
         _alignment_request(wav, text="你好", language="Chinese"),
-        tmp_path / "a.json",
+        out,
     )
 
     audio, text, language = aligner.align_calls[0]
@@ -546,6 +547,11 @@ def test_align_passes_original_wav_text_and_language(tmp_path, monkeypatch) -> N
     assert audio == str(wav)  # the original WAV path, as a string
     assert text == "你好"
     assert language == "Chinese"
+    assert json.loads(out.read_text(encoding="utf-8")) == [
+        {"text": "你", "start": 0.0, "end": 0.5},
+        {"text": "好", "start": 0.5, "end": 1.0},
+    ]
+    assert artifact.token_count == 2
 
 
 def test_align_preserves_timestamp_precision_in_output(tmp_path, monkeypatch) -> None:
@@ -616,16 +622,6 @@ def test_loads_model_once_and_reuses_engine_for_repeated_aligns(
     # The real _load_aligner ran exactly once; both align calls reused it.
     assert engine._aligner is aligner
     assert len(aligner.align_calls) == 2
-
-
-def test_engine_reuses_same_fake_instance(tmp_path, monkeypatch) -> None:
-    items = [("你", 0.0, 1.0)]
-    aligner = _FakeAligner(lambda text: [_FakeResult([_FakeItem(*it) for it in items])])
-    engine = _engine(monkeypatch, aligner)
-    wav = _pcm_wav(tmp_path / "u.wav", frames=24000)
-    engine.align(_alignment_request(wav, text="你"), tmp_path / "a.json")
-    engine.align(_alignment_request(wav, text="你"), tmp_path / "b.json")
-    assert engine._aligner is aligner
 
 
 # --- runtime: failure classes ----------------------------------------------
@@ -983,22 +979,6 @@ def test_downstream_captions_still_build_from_engine_alignment(
 # =====================================================================
 
 
-def test_align_exact_match_writes_artifact(tmp_path, monkeypatch) -> None:
-    items = [("你", 0.0, 0.5), ("好", 0.5, 1.0)]
-    aligner = _FakeAligner(lambda text: [_FakeResult([_FakeItem(*it) for it in items])])
-    engine = _engine(monkeypatch, aligner)
-
-    wav = _pcm_wav(tmp_path / "u.wav", frames=24000)
-    artifact = engine.align(_alignment_request(wav, text="你好"), tmp_path / "a.json")
-
-    written = json.loads((tmp_path / "a.json").read_text(encoding="utf-8"))
-    assert written == [
-        {"text": "\u4f60", "start": 0.0, "end": 0.5},
-        {"text": "\u597d", "start": 0.5, "end": 1.0},
-    ]
-    assert artifact.token_count == 2
-
-
 def test_align_missing_aligned_token_fails_matching(tmp_path, monkeypatch) -> None:
     # The request text has a spoken char beyond what the tokens cover.
     items = [("你", 0.0, 0.5)]
@@ -1075,32 +1055,18 @@ def test_align_matching_consumes_original_text_punctuation_in_order(tmp_path, mo
 # =====================================================================
 
 
-def test_align_single_result_set_writes_artifact(tmp_path, monkeypatch) -> None:
-    items = [("你", 0.0, 0.5), ("好", 0.5, 1.0)]
-    aligner = _FakeAligner(lambda text: [_FakeResult([_FakeItem(*it) for it in items])])
-    engine = _engine(monkeypatch, aligner)
-
-    wav = _pcm_wav(tmp_path / "u.wav", frames=24000)
-    artifact = engine.align(_alignment_request(wav, text="你好"), tmp_path / "a.json")
-    assert artifact.token_count == 2
-
-
-def test_align_multiple_result_sets_raises_runtime_error(tmp_path, monkeypatch) -> None:
-    items = [("你", 0.0, 0.5), ("好", 0.5, 1.0)]
-    aligner = _FakeAligner(
-        lambda text: [_FakeResult([_FakeItem(*it) for it in items]), _FakeResult([_FakeItem(*it) for it in items])]
-    )
-    engine = _engine(monkeypatch, aligner)
-
-    wav = _pcm_wav(tmp_path / "u.wav", frames=24000)
-    with pytest.raises(AlignmentRuntimeError):
-        engine.align(_alignment_request(wav, text="你好"), tmp_path / "a.json")
-
-
-def test_align_multiple_result_sets_raises_runtime_with_chaining(tmp_path, monkeypatch) -> None:
+@pytest.mark.parametrize(
+    "items,text",
+    [
+        ([("你", 0.0, 0.5)], "你"),
+        ([("你", 0.0, 0.5), ("好", 0.5, 1.0)], "你好"),
+    ],
+)
+def test_align_multiple_result_sets_raise_chained_error_without_output(
+    tmp_path, monkeypatch, items, text,
+) -> None:
     # A result-count mismatch carries a chained ValueError representing the
     # violated exactly-one result-set invariant.
-    items = [("你", 0.0, 0.5)]
     aligner = _FakeAligner(
         lambda text: [_FakeResult([_FakeItem(*it) for it in items]), _FakeResult([_FakeItem(*it) for it in items])]
     )
@@ -1108,20 +1074,8 @@ def test_align_multiple_result_sets_raises_runtime_with_chaining(tmp_path, monke
 
     wav = _pcm_wav(tmp_path / "u.wav", frames=24000)
     with pytest.raises(AlignmentRuntimeError) as excinfo:
-        engine.align(_alignment_request(wav, text="你"), tmp_path / "a.json")
+        engine.align(_alignment_request(wav, text=text), tmp_path / "a.json")
     assert isinstance(excinfo.value.__cause__, ValueError)
-
-
-def test_align_multiple_result_sets_writes_no_output_file(tmp_path, monkeypatch) -> None:
-    items = [("你", 0.0, 0.5)]
-    aligner = _FakeAligner(
-        lambda text: [_FakeResult([_FakeItem(*it) for it in items]), _FakeResult([_FakeItem(*it) for it in items])]
-    )
-    engine = _engine(monkeypatch, aligner)
-
-    wav = _pcm_wav(tmp_path / "u.wav", frames=24000)
-    with pytest.raises(AlignmentRuntimeError):
-        engine.align(_alignment_request(wav, text="你"), tmp_path / "a.json")
     assert not (tmp_path / "a.json").exists()
 
 
