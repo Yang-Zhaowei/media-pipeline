@@ -6,7 +6,7 @@
 
 The pipeline accepts caller-authored performance units. Each unit may contain
 multiple sentences and is processed as one TTS request. Ordinary narration
-defaults to an empty instruction. A segment can inherit the top-level
+defaults to an empty instruction. A CustomVoice segment can inherit the top-level
 instruction, explicitly clear it, or provide a local instruction. Caption
 segmentation remains independent.
 
@@ -39,7 +39,7 @@ via [PR #13](https://github.com/Yang-Zhaowei/media-pipeline/pull/13), squash
 merged on 2026-10-04. The independent Qwen3-TTS 12Hz Base normal-ICL runtime
 creates reusable local CPU tensor assets and produces production-compatible
 mono PCM16 `TTSArtifact` outputs. PR #13 left CustomVoice, the renderer, and the
-speech CLI unchanged; segmented selection is the separate Issue #14 work below.
+speech CLI unchanged; PR #15 adds segmented selection as recorded below.
 
 The owner reported real ai-core acceptance at exact PR HEAD
 `8d14639976c7bdcf4d2c1a6ddce3d9b7672cc200`: real-torch serialization tests
@@ -49,23 +49,28 @@ See the [closure evidence](validation/voice-clone-closure.md) and
 [runtime contract / replay commands](dev/voice-clone-runtime.md).
 This documentation update does not rerun those checks.
 
+## Segmented clone rendering
+
+[Issue #14](https://github.com/Yang-Zhaowei/media-pipeline/issues/14) is closed
+via [PR #15](https://github.com/Yang-Zhaowei/media-pipeline/pull/15), squash
+merged on 2026-10-04 (Asia/Shanghai). Scripts select exactly one legacy
+`speaker` or relative clone `voice`; clone instructions must be omitted/empty.
+CustomVoice and downstream behavior remain compatible. Static validation is
+portable; one TTS subprocess reuses one loaded asset and one Base engine.
+
+The owner accepted a real three-unit ai-core render, all downstream stages,
+final artifacts, voice identity/consistency, transitions, and subtitle sync.
+Recorded validation: Windows full CPU suite **547 passed, 10 skipped**;
+owner ai-core clone tests **55 passed**, CLI tests **75 passed**.
+See the [contract](dev/render-entry-point.md) and
+[exact-head evidence / replay](validation/clone-render-acceptance.md).
+This documentation closure did not rerun those checks.
+
 ## Current work
 
-[Issue #14](https://github.com/Yang-Zhaowei/media-pipeline/issues/14) connects
-accepted reusable clone assets to the existing segmented speech renderer and
-CLI. Scripts select exactly one legacy `speaker` or relative clone `voice`
-object. Clone instructions must be omitted/empty; CustomVoice semantics and
-the downstream pipeline remain compatible. Static validation stays portable;
-the TTS subprocess loads one asset and one Base engine for all segments.
-See the [script/runtime contract](dev/render-entry-point.md) and
-[owner acceptance procedure](validation/clone-render-acceptance.md).
-Real ai-core cloned rendering for at least three performance units, human
-identity/consistency/transition acceptance, and subtitle synchronization remain
-open merge gates. Standalone Issue #12 acceptance does not close these gates.
-
 [Issue #8](https://github.com/Yang-Zhaowei/media-pipeline/issues/8) remains open
-for production-use validation of long-form narration stability using existing
-tools.
+for production narration stability, including the accepted clone render's
+remaining cross-segment emotion/delivery drift. Evaluate with existing tools.
 
 See the [podcast pilot workflow](workflows/podcast-pilot.md) and
 [project roadmap](ROADMAP.md). Runtime setup is in [core runtime notes](dev/core-runtime.md).

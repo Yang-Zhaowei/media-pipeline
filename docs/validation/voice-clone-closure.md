@@ -41,5 +41,6 @@ the documentation update did not rerun tests.
 
 This closes the independent 12Hz Base normal-ICL runtime: a saved asset loads
 in a fresh process and supports repeated synthesis through the production mono
-PCM16 `TTSArtifact` contract. CustomVoice, the renderer, and speech CLI are
-unchanged. See the [runtime contract and replay commands](../dev/voice-clone-runtime.md).
+PCM16 `TTSArtifact` contract. PR #13 left CustomVoice, the renderer, and speech
+CLI unchanged. PR #15 later added [accepted segmented clone rendering](clone-render-acceptance.md).
+See the [runtime contract and replay commands](../dev/voice-clone-runtime.md).

@@ -55,6 +55,12 @@ The owner accepted real asset creation, fresh-process reuse, two utterance
 outputs, and human voice identity / consistency. See the
 [closure evidence](validation/voice-clone-closure.md).
 
+Segmented clone rendering is complete via
+[PR #15](https://github.com/Yang-Zhaowei/media-pipeline/pull/15), closing Issue #14.
+Real three-unit ai-core rendering and human acceptance passed; see the
+[evidence](validation/clone-render-acceptance.md). Remaining emotion/delivery
+stability is tracked in Issue #8.
+
 ## Next gate: real workflow evaluation
 
 Speech Pipeline v0 is complete. Stop speculative feature development and

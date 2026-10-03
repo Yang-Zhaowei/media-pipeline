@@ -61,6 +61,11 @@ See the [closure evidence](../validation/voice-clone-closure.md) and
 provided by the owner; this documentation update did not rerun inference,
 serialization tests, or listening, and made no runtime environment changes.
 
+PR #15 also passed owner-reported three-unit segmented clone rendering on this
+Base runtime, with one asset/model load and three syntheses followed by the
+complete downstream pipeline and human acceptance. See the
+[exact-head evidence](../validation/clone-render-acceptance.md).
+
 ### Forced Alignment
 
 Environment:

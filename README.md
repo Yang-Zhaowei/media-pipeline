@@ -34,7 +34,7 @@ into caller-approved performance units. A unit may contain multiple sentences
 and is sent as one TTS request. The caller chooses unit boundaries and any
 directing instructions; the pipeline does not segment or interpret the script.
 
-Ordinary narration uses an empty instruction by default. A segment can inherit
+CustomVoice narration uses an empty instruction by default. A segment can inherit
 the top-level instruction, explicitly clear it, or provide its own direction.
 Subtitle boundaries are determined independently by alignment and caption
 compilation.
@@ -61,8 +61,13 @@ owner-confirmed real ai-core and human acceptance. See the
 [runtime contract](docs/dev/voice-clone-runtime.md) and
 [closure evidence](docs/validation/voice-clone-closure.md).
 
+Segmented clone rendering is complete via
+[PR #15](https://github.com/Yang-Zhaowei/media-pipeline/pull/15), closing Issue #14.
+Real ai-core and human acceptance are recorded in the
+[clone-render evidence](docs/validation/clone-render-acceptance.md).
+
 [Issue #8](https://github.com/Yang-Zhaowei/media-pipeline/issues/8) remains open
-to validate long-form narration stability in production.
+for production narration stability, including cross-segment emotion/delivery drift.
 See the [current state](docs/CURRENT.md) and [podcast pilot workflow](docs/workflows/podcast-pilot.md).
 
 Project scope and future proposals are described in the [roadmap](docs/ROADMAP.md).

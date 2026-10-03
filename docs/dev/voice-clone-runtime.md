@@ -110,9 +110,10 @@ See the [owner closure evidence](../validation/voice-clone-closure.md) for
 tensor properties, exact WAV metadata, and provenance. This documentation
 update did not rerun these checks.
 
-That acceptance covers the standalone runtime. The Issue #14 segmented clone
-renderer has a separate [ai-core E2E owner gate](../validation/clone-render-acceptance.md);
-standalone acceptance does not establish its final WAV/SRT/timeline acceptance.
+The segmented clone renderer is separately complete via PR #15 / Issue #14,
+with owner-accepted three-unit ai-core E2E and human listening. See its
+[exact-head evidence / replay](../validation/clone-render-acceptance.md).
+Remaining cross-segment emotion/delivery drift is tracked in Issue #8.
 
 ## Replaying the two-process acceptance
 

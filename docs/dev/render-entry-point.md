@@ -109,14 +109,14 @@ complete in PR #11. Recorded CPU validation and closure status are in
 [CURRENT](../CURRENT.md#agent-facing-speech-cli); this documentation update
 does not rerun model integration.
 
-[Issue #14](https://github.com/Yang-Zhaowei/media-pipeline/issues/14) connects
-the separately accepted [Base runtime](voice-clone-runtime.md) to this renderer.
-The cloned multi-segment ai-core E2E and human acceptance remain open merge
-gates; earlier CustomVoice or standalone clone acceptance does not close them.
-See the [exact owner acceptance procedure](../validation/clone-render-acceptance.md).
+[PR #15](https://github.com/Yang-Zhaowei/media-pipeline/pull/15) is merged and
+Issue #14 is closed. The owner accepted a real three-unit clone render,
+one asset/Base load, complete downstream artifacts, identity/consistency,
+transitions, and subtitle sync. See the
+[exact-head evidence and replay procedure](../validation/clone-render-acceptance.md).
 
 [Issue #8](https://github.com/Yang-Zhaowei/media-pipeline/issues/8) remains open
-for production-use validation of long-form narration stability.
+for production narration stability, including cross-segment emotion/delivery drift.
 
 The renderer does not automatically split, interpret or rewrite the manuscript.
 
