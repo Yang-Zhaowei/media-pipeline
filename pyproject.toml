@@ -10,6 +10,9 @@ readme = "README.md"
 requires-python = ">=3.10"
 dependencies = []
 
+[project.scripts]
+media-pipeline = "media_pipeline.cli:main"
+
 [project.optional-dependencies]
 dev = ["pytest>=8"]
 
