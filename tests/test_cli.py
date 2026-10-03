@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import builtins
 import json
 import os
 import subprocess
@@ -38,6 +39,18 @@ def _write_script(tmp_path: Path, **overrides: object) -> Path:
     payload = {
         "language": "Chinese",
         "speaker": "Uncle_Fu",
+        "segments": [{"id": "unit", "text": "欢迎收听。"}],
+        **overrides,
+    }
+    path = tmp_path / "speech.json"
+    path.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+    return path
+
+
+def _write_clone_script(tmp_path: Path, **overrides: object) -> Path:
+    payload = {
+        "language": "Chinese",
+        "voice": {"type": "clone", "asset": "voices/voice.pt"},
         "segments": [{"id": "unit", "text": "欢迎收听。"}],
         **overrides,
     }
@@ -157,6 +170,102 @@ def test_validate_default_instruct_and_budget_override(tmp_path, capsys) -> None
     assert payload["plan"]["segments"][0]["instruct_source"] == "top_level"
 
 
+def test_validate_clone_plan_is_portable_without_opening_asset_or_model_tasks(tmp_path, capsys, monkeypatch) -> None:
+    segments = [
+        {"id": "inherit", "text": "第一句。", "pause_after_ms": 100},
+        {"id": "clear", "text": "第二句。", "instruct": ""},
+    ]
+    asset = tmp_path / "voices" / "voice.pt"
+    asset.parent.mkdir()
+    asset.write_bytes(b"deliberately not a serialized voice asset")
+    script = _write_clone_script(tmp_path, segments=segments)
+    before = script.read_bytes()
+    monkeypatch.setattr(cli, "render_speech", _no_call)
+    monkeypatch.setattr(render, "_make_tts_task", _no_call)
+    monkeypatch.setattr(render, "_make_align_task", _no_call)
+    original_open = builtins.open
+    original_path_open = Path.open
+
+    def open_without_asset(file, *args, **kwargs):
+        if isinstance(file, (str, os.PathLike)) and Path(file) == asset:
+            pytest.fail("static validation must not open or deserialize the voice asset")
+        return original_open(file, *args, **kwargs)
+
+    def path_open_without_asset(path, *args, **kwargs):
+        if path == asset:
+            pytest.fail("static validation must not open or deserialize the voice asset")
+        return original_path_open(path, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "open", open_without_asset)
+    monkeypatch.setattr(Path, "open", path_open_without_asset)
+    code, payload = _invoke(capsys, ["speech", "validate", str(script)])
+    assert code == 0
+    assert payload["command"] == "validate"
+    assert payload["status"] == "valid"
+    assert payload["plan"] == {
+        "language": "Chinese",
+        "voice": {"type": "clone", "asset": "voices/voice.pt"},
+        "max_segment_chars": 200,
+        "segments": [
+            {
+                "order": index + 1, "id": segment["id"], "text": segment["text"],
+                "text_length": len(segment["text"]),
+                "pause_after_ms": segment.get("pause_after_ms", 0),
+                "effective_instruct": "",
+                "instruct_source": "segment" if "instruct" in segment else "top_level",
+            }
+            for index, segment in enumerate(segments)
+        ],
+    }
+    assert "speaker" not in payload["plan"]
+    assert script.read_bytes() == before
+    assert set(tmp_path.iterdir()) == {script, asset.parent}
+
+
+@pytest.mark.parametrize("asset", ["voices/missing.pt", "voices\\missing.pt"])
+def test_validate_clone_missing_asset_preserves_authored_relative_form(tmp_path, capsys, asset) -> None:
+    script = _write_clone_script(tmp_path, voice={"type": "clone", "asset": asset})
+    code, payload = _invoke(capsys, ["speech", "validate", str(script)])
+    assert code == 0
+    assert payload["plan"]["voice"] == {"type": "clone", "asset": asset}
+    assert list(tmp_path.iterdir()) == [script]
+
+
+@pytest.mark.parametrize("command", ["validate", "render"])
+@pytest.mark.parametrize(
+    ("overrides", "reason"),
+    [
+        ({"speaker": "Uncle_Fu"}, "speaker"),
+        ({"voice": None}, "voice"),
+        ({"voice": {"type": "builtin", "asset": "voices/voice.pt"}}, "voice"),
+        ({"voice": {"type": "clone", "asset": "voices/voice.pt", "extra": True}}, "voice"),
+        ({"voice": {"type": "clone", "asset": ""}}, "voice.asset"),
+        ({"voice": {"type": "clone", "asset": "/voice.pt"}}, "voice.asset"),
+        ({"voice": {"type": "clone", "asset": "C:\\voices\\voice.pt"}}, "voice.asset"),
+        ({"voice": {"type": "clone", "asset": "../voice.pt"}}, "voice.asset"),
+        ({"instruct": "更激动一点"}, "non-empty instruct is unsupported for cloned voices"),
+        ({"segments": [{"id": "unit", "text": "欢迎收听。", "instruct": "强调这一句"}]},
+         "non-empty instruct is unsupported for cloned voices"),
+    ],
+)
+def test_clone_static_failures_keep_json_exit_and_no_artifact_contract(tmp_path, capsys, monkeypatch, command, overrides, reason) -> None:
+    script = _write_clone_script(tmp_path, **overrides)
+    before = script.read_bytes()
+    monkeypatch.setattr(cli, "render_speech", _no_call)
+    monkeypatch.setattr(render, "_make_tts_task", _no_call)
+    monkeypatch.setattr(render, "_make_align_task", _no_call)
+    argv = ["speech", command, str(script)]
+    if command == "render":
+        argv += ["--output", str(tmp_path / "run")]
+    code, payload = _invoke(capsys, argv)
+    assert code == 3
+    assert payload["command"] == command
+    assert payload["status"] == "validation_failed"
+    assert reason in payload["error"]
+    assert script.read_bytes() == before
+    assert list(tmp_path.iterdir()) == [script]
+
+
 @pytest.mark.parametrize("command", ["validate", "render"])
 def test_preflight_preserves_aggregated_api_errors_and_input(tmp_path, capsys, monkeypatch, command) -> None:
     script = _write_script(
@@ -264,6 +373,53 @@ def test_runtime_resolution_and_exact_render_delegation(tmp_path, capsys, monkey
     assert payload["segments"] == [{"segment_id": "unit", "status": "ok", "stage": None, "reason": None}]
     for key in ("report_path", "wav_path", "srt_path", "timeline_path"):
         assert Path(payload[key]).is_absolute()
+
+
+def test_clone_render_keeps_existing_python_api_delegation(tmp_path, capsys, monkeypatch) -> None:
+    script = _write_clone_script(tmp_path)
+    run_dir = tmp_path / "run"
+    _set_runtime(monkeypatch)
+    calls = []
+
+    def render_speech(*args, **kwargs):
+        calls.append((args, kwargs))
+        return _complete(run_dir)
+
+    monkeypatch.setattr(cli, "render_speech", render_speech)
+    code, payload = _invoke(capsys, ["speech", "render", str(script), "--output", str(run_dir)])
+    assert code == 0
+    assert payload["status"] == "complete"
+    assert calls == [((str(script), str(run_dir)), {
+        **_RUNTIME, "device": "cuda:0", "max_segment_chars": 200,
+    })]
+
+
+@pytest.mark.parametrize(
+    "reason",
+    [
+        "voice asset does not exist", "malformed voice asset", "unsafe serialization rejected",
+        "incompatible checkpoint", "Base model load failed", "clone synthesis failed",
+    ],
+)
+def test_clone_render_failures_preserve_structured_cli_status_and_reason(tmp_path, capsys, monkeypatch, reason) -> None:
+    script = _write_clone_script(tmp_path)
+    run_dir = tmp_path / "run"
+    _set_runtime(monkeypatch)
+
+    def fail(*args, **kwargs):
+        run_dir.mkdir()
+        (run_dir / "report.json").write_text(json.dumps({"status": "failed", "reason": reason}), encoding="utf-8")
+        raise RenderError(reason, run_dir=run_dir)
+
+    monkeypatch.setattr(cli, "render_speech", fail)
+    code, payload = _invoke(capsys, ["speech", "render", str(script), "--output", str(run_dir)])
+    assert code == 5
+    assert payload["command"] == "render"
+    assert payload["status"] == "failed"
+    assert payload["error"] == reason
+    assert payload["run_dir"] == str(run_dir.resolve())
+    assert payload["report_path"] == str((run_dir / "report.json").resolve())
+    assert all(payload[key] is None for key in ("wav_path", "srt_path", "timeline_path"))
 
 
 @pytest.mark.parametrize("value", ["", "   "])
@@ -397,8 +553,9 @@ def _subprocess_env() -> dict[str, str]:
     return {**os.environ, "PYTHONPATH": str(_ROOT / "src"), "PYTHONIOENCODING": "ascii"}
 
 
-def test_module_cli_writes_utf8_json_and_imports_no_model_runtime(tmp_path) -> None:
-    script = _write_script(tmp_path)
+@pytest.mark.parametrize("voice_source", ["speaker", "clone"])
+def test_module_cli_writes_utf8_json_and_imports_no_model_runtime(tmp_path, voice_source) -> None:
+    script = (_write_script if voice_source == "speaker" else _write_clone_script)(tmp_path)
     guard = """
 import importlib.abc
 import sys

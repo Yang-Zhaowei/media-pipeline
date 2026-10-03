@@ -7,8 +7,10 @@ reusable CPU prompt or synthesizes multiple already-segmented utterances.
 v0 supports the 12Hz Base checkpoints; unknown tokenizer families fail rather
 than guessing their code shapes. Outputs use the existing waveform converter,
 WAV writer/readback, and
-`TTSArtifact` contract. CustomVoice, speech scripts, renderer, and speech CLI
-are unchanged. `x_vector_only_mode` and automatic transcription are deferred.
+`TTSArtifact` contract. CustomVoice requests retain their behavior.
+For selecting a saved asset in segmented speech, see the
+[script/CLI voice-source contract](render-entry-point.md#reusable-cloned-voice).
+`x_vector_only_mode` and automatic transcription are deferred.
 
 ## Verified upstream contract
 
@@ -107,6 +109,10 @@ listening accepted recognizable cloned identity and acceptable consistency.
 See the [owner closure evidence](../validation/voice-clone-closure.md) for
 tensor properties, exact WAV metadata, and provenance. This documentation
 update did not rerun these checks.
+
+That acceptance covers the standalone runtime. The Issue #14 segmented clone
+renderer has a separate [ai-core E2E owner gate](../validation/clone-render-acceptance.md);
+standalone acceptance does not establish its final WAV/SRT/timeline acceptance.
 
 ## Replaying the two-process acceptance
 

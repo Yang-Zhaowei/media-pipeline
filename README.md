@@ -42,6 +42,12 @@ compilation.
 See the [render entry point](docs/dev/render-entry-point.md) and
 [performance-unit contract](docs/contracts/performance-unit-instruct.md).
 
+Scripts can select a reusable clone asset with
+`"voice": {"type": "clone", "asset": "voices/voice.pt"}` instead of `speaker`.
+The asset path is relative to the script directory. Cloned voices require
+omitted or empty instructions; see the
+[voice-source contract](docs/dev/render-entry-point.md#reusable-cloned-voice).
+
 ## Project status
 
 The agent-facing speech CLI is complete in
