@@ -9,7 +9,8 @@ determine subtitle boundaries independently.
 
 ## Instruction rules
 
-Top-level `instruct` is optional and defaults to `""`. Ordinary narration uses
+For legacy CustomVoice `speaker` scripts, top-level `instruct` is optional and
+defaults to `""`. Ordinary narration uses
 this empty default, without boilerplate direction.
 
 | Segment input | Effective instruction |
@@ -20,6 +21,12 @@ this empty default, without boilerplate direction.
 
 Strings are passed verbatim. Non-string values, including `null`, and unknown
 fields are rejected before rendering. Existing scripts retain their behavior.
+
+For `voice.type == "clone"`, top-level and segment instructions must be omitted
+or exactly `""`. Every non-empty string (including whitespace) is rejected at
+static preflight, even if all segments clear a non-empty top-level instruction.
+The error is `non-empty instruct is unsupported for cloned voices`.
+See the [voice-source contract](../dev/render-entry-point.md#reusable-cloned-voice).
 
 `request.json` preserves omission versus explicit clearing for replay.
 Each report segment records `effective_instruct` and `instruct_source`

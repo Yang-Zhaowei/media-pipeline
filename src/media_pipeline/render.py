@@ -9,8 +9,8 @@ total timeline, reusing the four existing production stages:
 This module is the orchestration boundary between deterministic portable
 processing and the two host-specific GPU runtimes. It follows the segment
 assembly contract in :file:`docs/contracts/segmented-speech-v0.md` (C1-C9) and
-intentionally adds nothing else: no CLI, no HTTP/MCP, no long-text splitting or
-script revision, no voice cloning, no resume/cache, no loudness mastering.
+supports legacy CustomVoice speakers or a reusable Base clone asset. It adds
+no HTTP/MCP, long-text splitting, script revision, resume/cache, or loudness mastering.
 
 Design boundaries enforced here:
 
@@ -37,7 +37,7 @@ import re
 import subprocess
 from dataclasses import dataclass, field
 from decimal import ROUND_HALF_UP, Decimal
-from pathlib import Path
+from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import Callable
 
 from .alignment import (
@@ -111,7 +111,7 @@ _SEG_SYNTHESIS_FAILED = "synthesis_failed"
 
 # Fields allowed in the top-level request and in each segment. Unknown fields are
 # rejected so a voice/time parameter typo cannot be silently ignored.
-_TOP_LEVEL_KEYS = frozenset({"language", "speaker", "instruct", "segments"})
+_TOP_LEVEL_KEYS = frozenset({"language", "speaker", "voice", "instruct", "segments"})
 _SEGMENT_KEYS = frozenset({"id", "text", "pause_after_ms", "instruct"})
 
 
@@ -150,10 +150,11 @@ class ValidatedScript:
     """A fully preflighted segmented script."""
 
     language: str
-    speaker: str
+    speaker: str | None
     instruct: str
     max_segment_chars: int
     segments: list[ValidatedSegment]
+    clone_asset: str | None = None
 
 
 @dataclass(frozen=True)
@@ -222,7 +223,9 @@ def load_and_validate_script(
     except OSError as exc:
         raise RenderError(f"cannot read script {path}: {exc}") from exc
 
-    validated, errors = _validate_script_data(raw, max_segment_chars)
+    validated, errors = _validate_script_data(
+        raw, max_segment_chars, script_dir=Path(path).parent
+    )
     if errors:
         raise RenderError(
             "script preflight failed:\n" + "\n".join(f"  - {e}" for e in errors)
@@ -231,7 +234,7 @@ def load_and_validate_script(
 
 
 def _validate_script_data(
-    data: object, max_segment_chars: int
+    data: object, max_segment_chars: int, *, script_dir: Path | None = None
 ) -> tuple[ValidatedScript, list[str]]:
     """Validate the parsed request, collecting every static error at once."""
 
@@ -251,13 +254,36 @@ def _validate_script_data(
     if not isinstance(language, str) or not language.strip():
         errors.append("language is required and must be a non-empty string")
 
+    if ("speaker" in data) == ("voice" in data):
+        errors.append("exactly one of speaker or voice must be present")
     speaker = data.get("speaker")
-    if not isinstance(speaker, str) or not speaker.strip():
-        errors.append("speaker is required and must be a non-empty string")
+    if "voice" not in data or "speaker" in data:
+        if not isinstance(speaker, str) or not speaker.strip():
+            errors.append("speaker is required and must be a non-empty string")
+
+    clone_asset = None
+    voice = data.get("voice")
+    is_clone = isinstance(voice, dict) and voice.get("type") == "clone"
+    if "voice" in data:
+        if not isinstance(voice, dict):
+            errors.append("voice must be an object with exactly type and asset")
+        else:
+            for key in set(voice) - {"type", "asset"}:
+                errors.append(f"unknown voice field {key!r}")
+            if not is_clone:
+                errors.append("voice.type must be 'clone'")
+            try:
+                _resolve_clone_asset(voice.get("asset"), script_dir or Path.cwd())
+            except RenderError as exc:
+                errors.append(str(exc))
+            else:
+                clone_asset = voice["asset"]
 
     instruct = data.get("instruct", "")
     if not isinstance(instruct, str):
         errors.append("instruct must be a string when present (defaults to empty)")
+    elif is_clone and instruct != "":
+        errors.append("instruct: non-empty instruct is unsupported for cloned voices")
 
     raw_segments = data.get("segments")  # type: ignore[union-attr]
     segments_list: list[dict] = []
@@ -265,6 +291,13 @@ def _validate_script_data(
         errors.append("segments is required and must be a non-empty array")
     else:
         _validate_segments(raw_segments, max_segment_chars, errors)
+        if is_clone:
+            for index, segment in enumerate(raw_segments):
+                if isinstance(segment, dict) and isinstance(segment.get("instruct"), str):
+                    if segment["instruct"] != "":
+                        errors.append(
+                            f"segment[{index}].instruct: non-empty instruct is unsupported for cloned voices"
+                        )
         # Build the usable list only from entries that are actually objects: a
         # malformed entry (for example ``null``) is already reported by
         # ``_validate_segments`` and must stay a summarised preflight error,
@@ -293,9 +326,42 @@ def _validate_script_data(
                 )
                 for seg in segments_list
             ],
+            clone_asset=clone_asset,
         ),
         [],
     )
+
+
+def _resolve_clone_asset(asset: object, script_dir: Path) -> Path:
+    """Resolve a portable relative asset inside its script directory tree.
+
+    Existing symlinks are resolved for containment; the asset need not exist
+    and is never opened/deserialized during static preflight. The returned host
+    path is used only by the private TTS subprocess, never portable provenance.
+    """
+    if not isinstance(asset, str) or not asset.strip():
+        raise RenderError("voice.asset must be a non-empty relative path")
+    windows = PureWindowsPath(asset)
+    if windows.drive or windows.root or PurePosixPath(asset).is_absolute() or ":" in asset:
+        raise RenderError("voice.asset must be a relative path without a drive, root, or URI scheme")
+    try:
+        if "\x00" in asset:
+            raise ValueError("path contains a NUL character")
+        root = script_dir.resolve()
+        resolved = (root / asset.replace("\\", "/")).resolve()
+        resolved.relative_to(root)
+    except (ValueError, OSError, RuntimeError) as exc:
+        raise RenderError(
+            "voice.asset must resolve inside the script directory: " + str(exc)
+        ) from exc
+    return resolved
+
+
+def _voice_fields(script: ValidatedScript) -> dict:
+    """Portable clone provenance or the unchanged legacy speaker field."""
+    if script.clone_asset is not None:
+        return {"voice": {"type": "clone", "asset": script.clone_asset}}
+    return {"speaker": script.speaker}
 
 
 def _validate_segments(
@@ -517,7 +583,7 @@ def render_speech(
         status=STATUS_RUNNING,
         config={
             "language": script.language,
-            "speaker": script.speaker,
+            **_voice_fields(script),
             "instruct": script.instruct,
             "max_segment_chars": script.max_segment_chars,
             "tts_python": str(tts_python),
@@ -548,7 +614,7 @@ def render_speech(
             json.dumps(
                 {
                     "language": script.language,
-                    "speaker": script.speaker,
+                    **_voice_fields(script),
                     "instruct": script.instruct,
                     "segments": [
                         {
@@ -579,7 +645,10 @@ def render_speech(
 
     try:
         # --- TTS: one load, synthesize every segment, then exit -------------
-        _run_tts_stage(run_dir, script, safe_names, segments, wav_task, report, device)
+        _run_tts_stage(
+            run_dir, script, safe_names, segments, wav_task, report, device,
+            script_dir=Path(script_path).parent.resolve(),
+        )
         report.completed_stages.append("tts")
 
         # --- Alignment: one load, align every segment independently ---------
@@ -628,6 +697,8 @@ def _run_tts_stage(
     wav_task: TaskCallable,
     report: _RunReport,
     device: str,
+    *,
+    script_dir: Path,
 ) -> None:
     """Run the TTS stage: one subprocess loads the model once and synthesizes all segments.
 
@@ -638,7 +709,7 @@ def _run_tts_stage(
     task = {
         "run_dir": str(run_dir),
         "language": script.language,
-        "speaker": script.speaker,
+        **_voice_fields(script),
         "instruct": script.instruct,
         "device": device,
         "segments": [
@@ -651,6 +722,8 @@ def _run_tts_stage(
             for seg in segments
         ],
     }
+    if script.clone_asset is not None:
+        task["script_dir"] = str(script_dir)
     results = wav_task(task)
 
     runtime_error = results.get("runtime_error")
@@ -1398,32 +1471,53 @@ try:
 
     from media_pipeline import CustomVoiceRequest
     from media_pipeline.postprocess import read_wav
-    from media_pipeline.runtimes.qwen_tts import Qwen3CustomVoiceTTS
     from media_pipeline.tts import TTSRuntimeError
 
     segments_dir = Path(task_dict["run_dir"]) / "segments"
     segments_dir.mkdir(parents=True, exist_ok=True)
 
+    clone = task_dict.get("voice")
+    synthesis_errors = (TTSRuntimeError, OSError)
     try:
-        engine = Qwen3CustomVoiceTTS(model_path, device=task_dict.get("device", "cuda:0"))
+        if clone is not None:
+            from media_pipeline.voice_clone import VoiceAssetError, VoiceCloneError, VoiceCloneRequest
+            from media_pipeline.render import _resolve_clone_asset
+            from media_pipeline.runtimes.qwen_voice_clone import Qwen3VoiceCloneTTS, load_voice_asset
+
+            synthesis_errors += (VoiceAssetError, VoiceCloneError)
+            asset_path = _resolve_clone_asset(clone["asset"], Path(task_dict["script_dir"]))
+            asset = load_voice_asset(asset_path)
+            engine = Qwen3VoiceCloneTTS(model_path, device=task_dict.get("device", "cuda:0"))
+        else:
+            from media_pipeline.runtimes.qwen_tts import Qwen3CustomVoiceTTS
+            engine = Qwen3CustomVoiceTTS(model_path, device=task_dict.get("device", "cuda:0"))
     except Exception as exc:
-        _dump({"runtime_error": f"failed to load TTS model: {exc}", "segments": []})
+        context = "failed to initialize clone TTS" if clone is not None else "failed to load TTS model"
+        _dump({"runtime_error": f"{context}: {exc}", "segments": []})
         sys.exit(3)
 
     results = []
     for seg in task_dict["segments"]:
         out_wav = segments_dir / (seg["safe_name"] + ".wav")
         try:
-            engine.synthesize(
-                CustomVoiceRequest(
-                    text=seg["text"],
-                    language=task_dict["language"],
-                    speaker=task_dict["speaker"],
-                    instruct=seg["instruct"],
-                ),
-                out_wav,
-            )
-        except (TTSRuntimeError, OSError) as exc:
+            if clone is not None:
+                if seg["instruct"] != "":
+                    raise VoiceCloneError("non-empty instruct is unsupported for cloned voices")
+                engine.synthesize(
+                    VoiceCloneRequest(text=seg["text"], language=task_dict["language"]),
+                    asset, out_wav,
+                )
+            else:
+                engine.synthesize(
+                    CustomVoiceRequest(
+                        text=seg["text"],
+                        language=task_dict["language"],
+                        speaker=task_dict["speaker"],
+                        instruct=seg["instruct"],
+                    ),
+                    out_wav,
+                )
+        except synthesis_errors as exc:
             _dump({"runtime_error": None, "segments": results + [
                 {"segment_id": seg["id"], "status": "synthesis_failed", "reason": str(exc)}
             ]})

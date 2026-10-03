@@ -97,7 +97,11 @@ def main(argv: list[str] | None = None) -> int:
             "validate", "valid", script_path=_path(args.script),
             plan={
                 "language": script.language,
-                "speaker": script.speaker,
+                **(
+                    {"speaker": script.speaker}
+                    if script.clone_asset is None
+                    else {"voice": {"type": "clone", "asset": script.clone_asset}}
+                ),
                 "max_segment_chars": script.max_segment_chars,
                 "segments": [
                     {
