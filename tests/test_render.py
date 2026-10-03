@@ -21,6 +21,7 @@ from __future__ import annotations
 import json
 import math
 import unicodedata
+from functools import lru_cache
 from pathlib import Path
 
 import pytest
@@ -138,18 +139,17 @@ class FakeAlignerEngine:
         return {"runtime_error": None, "segments": results}
 
 
-def _waveform(frames: int) -> list[int]:
+@lru_cache(maxsize=32)
+def _waveform(frames: int) -> tuple[int, ...]:
     """A finite, non-silent, mono float waveform -> int16 PCM (never non-finite)."""
 
     out: list[int] = []
     for index in range(frames):
         decay = max(0.05, 1.0 - index / max(1, frames))
-        import numbers
-
         f = 0.3 * math.sin(index / 80.0) * decay
         q = int(math.floor(f * 32_768 + 0.5))
         out.append(max(-32_768, min(32_767, q)))
-    return out
+    return tuple(out)
 
 
 def _write_alignment(path: Path, text: str, duration: float) -> None:
@@ -403,6 +403,367 @@ def test_text_is_passed_verbatim_without_strip(tmp_path: Path) -> None:
     assert request["segments"][0]["text"] == "  你好 ，  world  "
 
 
+def test_segment_instruct_resolution_request_and_complete_provenance(tmp_path: Path) -> None:
+    """Overrides resolve by field presence and remain replayable in request.json."""
+
+    top_level = "  whole-render direction  "
+    explicit = "  local direction\n"
+    script = _write_script(
+        tmp_path,
+        [
+            _seg("inherit", "继承全局指令。"),
+            {**_seg("clear", "清除全局指令。"), "instruct": ""},
+            {**_seg("override", "局部覆盖指令。"), "instruct": explicit},
+        ],
+        instruct=top_level,
+    )
+    run = tmp_path / "run"
+    observed_task: list[dict] = []
+
+    class RecordingTTS(FakeTTSEngine):
+        def __call__(self, task: dict) -> dict:
+            observed_task.append(task)
+            return super().__call__(task)
+
+    result = render_speech(
+        script,
+        run,
+        tts_python="python",
+        alignment_python="python",
+        tts_model="/m",
+        alignment_model="/m",
+        max_segment_chars=100,
+        _wav_task=RecordingTTS(durations={"inherit": 1, "clear": 1, "override": 1}),
+        _align_task=FakeAlignerEngine(),
+    )
+    assert result.status == STATUS_COMPLETE
+
+    request = json.loads((run / "request.json").read_text(encoding="utf-8"))
+    assert request["instruct"] == top_level
+    request_segments = {seg["id"]: seg for seg in request["segments"]}
+    assert "instruct" not in request_segments["inherit"]
+    assert request_segments["clear"]["instruct"] == ""
+    assert request_segments["override"]["instruct"] == explicit
+
+    actual_task = observed_task[0]
+    assert [seg["instruct"] for seg in actual_task["segments"]] == [
+        top_level,
+        "",
+        explicit,
+    ]
+    report = json.loads((run / "report.json").read_text(encoding="utf-8"))
+    assert report["config"]["instruct"] == top_level
+    assert [
+        (seg["effective_instruct"], seg["instruct_source"])
+        for seg in report["segments"]
+    ] == [
+        (top_level, "top_level"),
+        ("", "segment"),
+        (explicit, "segment"),
+    ]
+
+    # request.json is itself accepted as input; replay keeps omitted versus
+    # explicitly empty segment fields intact.
+    replay = tmp_path / "replay"
+    replay_result = render_speech(
+        run / "request.json",
+        replay,
+        tts_python="python",
+        alignment_python="python",
+        tts_model="/m",
+        alignment_model="/m",
+        max_segment_chars=100,
+        _wav_task=FakeTTSEngine(durations={"inherit": 1, "clear": 1, "override": 1}),
+        _align_task=FakeAlignerEngine(),
+    )
+    assert replay_result.status == STATUS_COMPLETE
+    replay_request = json.loads((replay / "request.json").read_text(encoding="utf-8"))
+    replay_segments = {seg["id"]: seg for seg in replay_request["segments"]}
+    assert "instruct" not in replay_segments["inherit"]
+    assert replay_segments["clear"]["instruct"] == ""
+
+
+def test_omitted_top_level_instruct_defaults_empty_for_legacy_script(tmp_path: Path) -> None:
+    """Legacy scripts without either instruction level resolve to empty strings."""
+
+    script = _write_script(tmp_path, [_seg("legacy", "普通旁白。")])
+    payload = json.loads(script.read_text(encoding="utf-8"))
+    payload.pop("instruct")
+    script.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+    run = tmp_path / "run"
+    observed: list[str] = []
+
+    def record_task(task: dict) -> dict:
+        observed.extend(seg["instruct"] for seg in task["segments"])
+        return FakeTTSEngine(durations={"legacy": 1})(task)
+
+    result = render_speech(
+        script,
+        run,
+        tts_python="python",
+        alignment_python="python",
+        tts_model="/m",
+        alignment_model="/m",
+        max_segment_chars=100,
+        _wav_task=record_task,
+        _align_task=FakeAlignerEngine(),
+    )
+    assert result.status == STATUS_COMPLETE
+    request = json.loads((run / "request.json").read_text(encoding="utf-8"))
+    assert request["instruct"] == ""
+    assert "instruct" not in request["segments"][0]
+    assert observed == [""]
+    report = json.loads((run / "report.json").read_text(encoding="utf-8"))
+    assert report["segments"][0]["effective_instruct"] == ""
+    assert report["segments"][0]["instruct_source"] == "top_level"
+
+
+@pytest.mark.parametrize(
+    "invalid",
+    [None, True, 7, ["direction"], {"text": "direction"}],
+    ids=["null", "bool", "number", "array", "object"],
+)
+@pytest.mark.parametrize("level", ["top-level", "segment"])
+def test_invalid_instruct_type_is_aggregated_before_run_starts(
+    tmp_path: Path, invalid: object, level: str
+) -> None:
+    """Bad instruction values never invoke a stage or create a run directory."""
+
+    script = _write_script(tmp_path, [_seg("a", "正文。")], instruct="global")
+    payload = json.loads(script.read_text(encoding="utf-8"))
+    if level == "top-level":
+        payload["instruct"] = invalid
+    else:
+        payload["segments"][0]["instruct"] = invalid
+    original = json.dumps(payload, ensure_ascii=False, indent=2) + "\n"
+    script.write_text(original, encoding="utf-8")
+    run = tmp_path / "run"
+    calls = {"tts": 0, "alignment": 0}
+
+    def tts_task(task: dict) -> dict:
+        calls["tts"] += 1
+        return {}
+
+    def alignment_task(task: dict) -> dict:
+        calls["alignment"] += 1
+        return {}
+
+    with pytest.raises(RenderError, match=r"instruct must be a string"):
+        render_speech(
+            script,
+            run,
+            tts_python="python",
+            alignment_python="python",
+            tts_model="/m",
+            alignment_model="/m",
+            max_segment_chars=100,
+            _wav_task=tts_task,
+            _align_task=alignment_task,
+        )
+    assert calls == {"tts": 0, "alignment": 0}
+    assert not run.exists()
+    assert script.read_text(encoding="utf-8") == original
+
+
+def test_instruct_typo_aggregates_with_other_static_errors(tmp_path: Path) -> None:
+    script = _write_script(
+        tmp_path,
+        [{**_seg("a", "正文。"), "instrcut": "typo", "instruct": 42}],
+        instruct=42,
+        langauge="typo",
+    )
+    original = script.read_text(encoding="utf-8")
+    run = tmp_path / "run"
+    calls = {"tts": 0, "alignment": 0}
+
+    def tts_task(task: dict) -> dict:
+        calls["tts"] += 1
+        return {}
+
+    def alignment_task(task: dict) -> dict:
+        calls["alignment"] += 1
+        return {}
+
+    with pytest.raises(RenderError) as excinfo:
+        render_speech(
+            script,
+            run,
+            tts_python="python",
+            alignment_python="python",
+            tts_model="/m",
+            alignment_model="/m",
+            max_segment_chars=100,
+            _wav_task=tts_task,
+            _align_task=alignment_task,
+        )
+    message = str(excinfo.value)
+    assert "unknown top-level field 'langauge'" in message
+    assert "unknown field 'instrcut'" in message
+    assert "instruct must be a string" in message
+    assert calls == {"tts": 0, "alignment": 0}
+    assert not run.exists()
+    assert script.read_text(encoding="utf-8") == original
+
+
+@pytest.mark.parametrize("failure", ["incomplete", "failed"])
+def test_instruct_provenance_remains_in_unsuccessful_reports(
+    tmp_path: Path, failure: str
+) -> None:
+    script = _write_script(
+        tmp_path,
+        [
+            _seg("inherited", "继承指令的文本。"),
+            {**_seg("cleared", "显式清除的文本。"), "instruct": ""},
+        ],
+        instruct="global direction",
+    )
+    run = tmp_path / "run"
+    if failure == "incomplete":
+        align_task = FakeAlignerEngine(fail_ids={"cleared"})
+        tts_task = FakeTTSEngine(durations={"inherited": 1, "cleared": 1})
+        result = render_speech(
+            script,
+            run,
+            tts_python="python",
+            alignment_python="python",
+            tts_model="/m",
+            alignment_model="/m",
+            max_segment_chars=100,
+            _wav_task=tts_task,
+            _align_task=align_task,
+        )
+        assert result.status == STATUS_INCOMPLETE
+    else:
+        with pytest.raises(RenderError):
+            render_speech(
+                script,
+                run,
+                tts_python="python",
+                alignment_python="python",
+                tts_model="/m",
+                alignment_model="/m",
+                max_segment_chars=100,
+                _wav_task=FakeTTSEngine(
+                    durations={"inherited": 1, "cleared": 1}, fail_ids={"cleared"}
+                ),
+                _align_task=FakeAlignerEngine(),
+            )
+    report = json.loads((run / "report.json").read_text(encoding="utf-8"))
+    assert report["status"] == (STATUS_INCOMPLETE if failure == "incomplete" else STATUS_FAILED)
+    assert [
+        (seg["effective_instruct"], seg["instruct_source"])
+        for seg in report["segments"]
+    ] == [("global direction", "top_level"), ("", "segment")]
+
+
+def test_multi_sentence_performance_unit_stays_one_tts_segment_and_has_multiple_captions(
+    tmp_path: Path,
+) -> None:
+    text = "第一句介绍今天的主题。第二句补充背景信息。第三句说明接下来会讨论的重点。"
+    script = _write_script(tmp_path, [_seg("unit", text)])
+    run = tmp_path / "run"
+    tts_calls: list[list[str]] = []
+
+    def record_tts(task: dict) -> dict:
+        tts_calls.append([seg["id"] for seg in task["segments"]])
+        return FakeTTSEngine(durations={"unit": 2.0})(task)
+
+    result = render_speech(
+        script,
+        run,
+        tts_python="python",
+        alignment_python="python",
+        tts_model="/m",
+        alignment_model="/m",
+        max_segment_chars=100,
+        _wav_task=record_tts,
+        _align_task=FakeAlignerEngine(),
+    )
+    assert result.status == STATUS_COMPLETE
+    assert tts_calls == [["unit"]]
+    srt = (run / "final" / "final.srt").read_text(encoding="utf-8")
+    assert len(_parse_srt(srt)) >= 2
+
+
+def test_embedded_tts_stage_builds_requests_and_synthesizes_each_segment_on_cpu(
+    tmp_path: Path,
+) -> None:
+    """Exercise the actual embedded stage with only its model adapter faked."""
+
+    import sys
+
+    from media_pipeline.render import _TTS_STAGE_SCRIPT
+
+    run = tmp_path / "run"
+    segments = [
+        {"id": "inherit", "safe_name": "inherit.wav", "text": "继承。", "instruct": "global"},
+        {"id": "clear", "safe_name": "clear.wav", "text": "清除。", "instruct": ""},
+        {"id": "override", "safe_name": "override.wav", "text": "覆盖。", "instruct": " local \n"},
+    ]
+    task = {
+        "run_dir": str(run),
+        "language": "Chinese",
+        "speaker": "Uncle_Fu",
+        "device": "cpu",
+        "segments": segments,
+    }
+    # This bootstrap only replaces the runtime adapter imported by the real
+    # embedded stage. CustomVoiceRequest and WAV writing remain production code.
+    fake_runtime = r'''
+import json
+import sys
+import types
+from pathlib import Path
+from media_pipeline import CustomVoiceRequest
+from media_pipeline.postprocess import write_wav
+
+class FakeRuntimeEngine:
+    def __init__(self, model_path, device="cuda:0"):
+        spec = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
+        run_dir = Path(spec["args"][1]["run_dir"])
+        state = run_dir / "engine-loads.txt"
+        with state.open("a", encoding="utf-8") as handle:
+            handle.write(model_path + "|" + device + "\n")
+
+    def synthesize(self, request, output_path):
+        assert isinstance(request, CustomVoiceRequest)
+        calls = Path(output_path).parents[1] / "runtime-requests.jsonl"
+        with calls.open("a", encoding="utf-8") as handle:
+            handle.write(json.dumps({
+                "text": request.text,
+                "language": request.language,
+                "speaker": request.speaker,
+                "instruct": request.instruct,
+            }, ensure_ascii=False) + "\n")
+        write_wav(output_path, [100] * 128, 24000)
+
+module = types.ModuleType("media_pipeline.runtimes.qwen_tts")
+module.Qwen3CustomVoiceTTS = FakeRuntimeEngine
+sys.modules[module.__name__] = module
+'''
+    result = _run_model_stage(
+        sys.executable,
+        fake_runtime + "\n" + _TTS_STAGE_SCRIPT,
+        ("fake-model", task),
+    )
+    assert result == {
+        "runtime_error": None,
+        "segments": [
+            {"segment_id": "inherit", "status": "ok"},
+            {"segment_id": "clear", "status": "ok"},
+            {"segment_id": "override", "status": "ok"},
+        ],
+    }
+    loads = (run / "engine-loads.txt").read_text(encoding="utf-8").splitlines()
+    assert loads == ["fake-model|cpu"]
+    requests = [
+        json.loads(line)
+        for line in (run / "runtime-requests.jsonl").read_text(encoding="utf-8").splitlines()
+    ]
+    assert [request["instruct"] for request in requests] == ["global", "", " local \n"]
+    assert [request["text"] for request in requests] == ["继承。", "清除。", "覆盖。"]
+
+
 # --- C6: output directory refusal ------------------------------------------
 
 
@@ -512,6 +873,9 @@ def test_alignment_failure_is_isolated_and_others_continue(tmp_path: Path) -> No
     bad = next(s for s in result.segments if s.segment_id == "bad")
     assert bad.stage == "alignment"
     assert bad.reason
+    report = json.loads((run / "report.json").read_text(encoding="utf-8"))
+    assert report["status"] == STATUS_INCOMPLETE
+    assert not (run / "final" / ".complete").exists()
 
 
 def test_alignment_runtime_failure_stops_the_run(tmp_path: Path) -> None:
@@ -537,6 +901,7 @@ def test_alignment_runtime_failure_stops_the_run(tmp_path: Path) -> None:
     # The run directory is reported so the partial artifacts can be recovered.
     assert excinfo.value.run_dir == run
     assert not (run / "final").exists()
+    assert not (run / "final" / ".complete").exists()
 
 
 def test_tts_synthesis_failure_stops_the_run_keeps_files(tmp_path: Path) -> None:
@@ -545,7 +910,7 @@ def test_tts_synthesis_failure_stops_the_run_keeps_files(tmp_path: Path) -> None
         [_seg("first", "第一段。"), _seg("second", "第二段。")],
     )
     run = tmp_path / "run"
-    with pytest.raises(RenderError, match="TTS synthesis failed"):
+    with pytest.raises(RenderError, match="TTS synthesis failed") as excinfo:
         render_speech(
             script,
             run,
@@ -562,6 +927,10 @@ def test_tts_synthesis_failure_stops_the_run_keeps_files(tmp_path: Path) -> None
         )
     # The already-generated first segment WAV is kept as evidence.
     assert (run / "segments").is_dir()
+    assert excinfo.value.run_dir == run
+    report = json.loads((run / "report.json").read_text(encoding="utf-8"))
+    assert report["status"] == STATUS_FAILED
+    assert not (run / "final" / ".complete").exists()
 
 
 def test_invalid_segment_wav_is_rejected(tmp_path: Path) -> None:
@@ -637,6 +1006,16 @@ def test_three_unequal_segments_timeline_and_frames(tmp_path: Path) -> None:
     assert result.wav_path is not None
     _, rate, frames = read_wav(result.wav_path)
     assert (rate, frames) == (SAMPLE_RATE, total)
+    srt = (run / "final" / "final.srt").read_text(encoding="utf-8")
+    assert srt.strip()
+    assert timeline["total_frames"] == frames
+    assert timeline["sample_rate"] == rate
+    report = json.loads((run / "report.json").read_text(encoding="utf-8"))
+    assert report["status"] == STATUS_COMPLETE
+    assert (run / "final" / ".complete").read_text(encoding="utf-8") == "complete"
+    assert report["completed_stages"] == [
+        "preflight", "tts", "alignment", "postprocess", "captions", "assemble"
+    ]
 
 
 def test_original_wav_preserved_and_cleaned_differs(tmp_path: Path) -> None:
@@ -667,30 +1046,6 @@ def test_original_wav_preserved_and_cleaned_differs(tmp_path: Path) -> None:
     assert cleaned_frames < raw_frames
     # The raw TTS WAV still exists and is intact.
     assert raw_wav.is_file()
-
-
-def test_final_products_read_back_consistent(tmp_path: Path) -> None:
-    script = _write_script(tmp_path, [_seg("a", "一段正文。")])
-    run = tmp_path / "run"
-    result = render_speech(
-        script,
-        run,
-        tts_python="python",
-        alignment_python="python",
-        tts_model="/m",
-        alignment_model="/m",
-        max_segment_chars=100,
-        _wav_task=FakeTTSEngine(durations={"a": 1.0}),
-        _align_task=FakeAlignerEngine(),
-    )
-    srt = (run / "final" / "final.srt").read_text(encoding="utf-8")
-    timeline = json.loads((run / "final" / "timeline.json").read_text(encoding="utf-8"))
-    assert result.wav_path is not None
-    _, rate, frames = read_wav(result.wav_path)
-    # The SRT, timeline and WAV all agree and re-verify against the disk copy.
-    assert srt.strip()
-    assert timeline["total_frames"] == frames
-    assert timeline["sample_rate"] == rate
 
 
 def test_zero_duration_caption_is_explicit_failure(tmp_path: Path) -> None:
@@ -790,20 +1145,6 @@ def test_caption_failure_records_segment_and_reports_incomplete(tmp_path: Path) 
     )
     run = tmp_path / "run"
 
-    def aligning_task(task: dict) -> dict:
-        # Both segments align OK, but force a caption mismatch for "bad" by
-        # writing a bad alignment for it after the engine reports success.
-        engine = FakeAlignerEngine()
-        result = engine(task)
-        seg_dir = Path(task["run_dir"]) / "segments"
-        for entry in result["segments"]:
-            if entry["segment_id"] == "bad":
-                bad = seg_dir / (
-                    next(p for p in seg_dir.glob("*.alignment.raw.json"))
-                )
-                # Not reachable here; use a second pass instead.
-        return result
-
     # Simpler: inject a custom alignment task that writes a mismatch for "bad".
     def bad_caption_task(task: dict) -> dict:
         seg_dir = Path(task["run_dir"]) / "segments"
@@ -838,96 +1179,6 @@ def test_caption_failure_records_segment_and_reports_incomplete(tmp_path: Path) 
     assert by_id["good"] == "ok"
     assert by_id["bad"] == "caption_failed"
     assert not (run / "final").exists()
-
-
-# --- C6: completion marker discipline ---------------------------------------
-
-
-def test_incomplete_run_has_no_completion_marker(tmp_path: Path) -> None:
-    script = _write_script(
-        tmp_path,
-        [_seg("a", "好段。"), _seg("b", "坏段。")],
-    )
-    run = tmp_path / "run"
-    result = render_speech(
-        script,
-        run,
-        tts_python="python",
-        alignment_python="python",
-        tts_model="/m",
-        alignment_model="/m",
-        max_segment_chars=100,
-        _wav_task=FakeTTSEngine(durations={"a": 1.0, "b": 1.0}),
-        _align_task=FakeAlignerEngine(fail_ids={"b"}),
-    )
-    report = json.loads((run / "report.json").read_text(encoding="utf-8"))
-    assert report["status"] == STATUS_INCOMPLETE
-    assert not (run / "final" / ".complete").exists()
-
-
-def test_complete_run_writes_completion_marker(tmp_path: Path) -> None:
-    script = _write_script(tmp_path, [_seg("a", "一段。")])
-    run = tmp_path / "run"
-    render_speech(
-        script,
-        run,
-        tts_python="python",
-        alignment_python="python",
-        tts_model="/m",
-        alignment_model="/m",
-        max_segment_chars=100,
-        _wav_task=FakeTTSEngine(durations={"a": 1.0}),
-        _align_task=FakeAlignerEngine(),
-    )
-    report = json.loads((run / "report.json").read_text(encoding="utf-8"))
-    assert report["status"] == STATUS_COMPLETE
-    assert (run / "final" / ".complete").read_text(encoding="utf-8") == "complete"
-
-
-def test_complete_run_reports_alignment_in_completed_stages(tmp_path: Path) -> None:
-    """A completed run records the alignment stage in ``completed_stages``.
-
-    The pipeline runs ``preflight -> tts -> alignment -> postprocess ->
-    captions -> assemble``; the alignment stage must be recorded so the report
-    does not skip it between tts and postprocess.
-    """
-
-    script = _write_script(tmp_path, [_seg("a", "一段。")])
-    run = tmp_path / "run"
-    render_speech(
-        script,
-        run,
-        tts_python="python",
-        alignment_python="python",
-        tts_model="/m",
-        alignment_model="/m",
-        max_segment_chars=100,
-        _wav_task=FakeTTSEngine(durations={"a": 1.0}),
-        _align_task=FakeAlignerEngine(),
-    )
-    report = json.loads((run / "report.json").read_text(encoding="utf-8"))
-    assert report["status"] == STATUS_COMPLETE
-    assert report["completed_stages"] == [
-        "preflight", "tts", "alignment", "postprocess", "captions", "assemble"
-    ]
-
-
-def test_runtime_failure_leaves_no_valid_completion_marker(tmp_path: Path) -> None:
-    script = _write_script(tmp_path, [_seg("a", "一段。")])
-    run = tmp_path / "run"
-    with pytest.raises(RenderError):
-        render_speech(
-            script,
-            run,
-            tts_python="python",
-            alignment_python="python",
-            tts_model="/m",
-            alignment_model="/m",
-            max_segment_chars=100,
-            _wav_task=FakeTTSEngine(durations={"a": 1.0}),
-            _align_task=FakeAlignerEngine(runtime=True),
-        )
-    assert not (run / "final" / ".complete").exists()
 
 
 # --- C4/C5: real subprocess protocol (CPU, no GPU runtime) ------------------
@@ -1720,35 +1971,6 @@ def test_sample_rate_mismatch_marks_report_failed(tmp_path):
             _wav_task=FakeTTSEngine(
                 durations={"a": 1.0, "b": 1.0},
                 rates={"a": SAMPLE_RATE, "b": 16_000},
-            ),
-            _align_task=FakeAlignerEngine(),
-        )
-    assert excinfo.value.run_dir == run
-    report = json.loads((run / "report.json").read_text(encoding="utf-8"))
-    assert report["status"] == STATUS_FAILED
-    assert not (run / "final" / ".complete").exists()
-
-
-def test_tts_synthesis_failure_marks_report_failed(tmp_path):
-    """A TTS synthesis RenderError leaves the report ``failed`` with ``run_dir``."""
-
-    script = _write_script(
-        tmp_path,
-        [_seg("first", "第一段。"), _seg("second", "第二段。")],
-    )
-    run = tmp_path / "run"
-    with pytest.raises(RenderError) as excinfo:
-        render_speech(
-            script,
-            run,
-            tts_python="python",
-            alignment_python="python",
-            tts_model="/m",
-            alignment_model="/m",
-            max_segment_chars=100,
-            _wav_task=FakeTTSEngine(
-                durations={"first": 1.0, "second": 1.0},
-                fail_ids={"second"},
             ),
             _align_task=FakeAlignerEngine(),
         )

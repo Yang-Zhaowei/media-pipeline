@@ -16,6 +16,7 @@ from __future__ import annotations
 import json
 import math
 import unicodedata
+from functools import lru_cache
 from pathlib import Path
 
 import pytest
@@ -67,9 +68,7 @@ class _FakeTTSEngine:
     """Writes a valid mono 16-bit PCM WAV as the fresh TTS artifact."""
 
     def __call__(self, request: Any, output_wav_path: Any) -> Any:
-        frames = SAMPLE_RATE * 8  # 8.00 s, a non-empty WAV
-        samples = _waveform_to_samples(_synthetic_waveform(frames))
-        write_wav(Path(str(output_wav_path)), samples, SAMPLE_RATE)
+        write_wav(Path(str(output_wav_path)), _fake_tts_samples(), SAMPLE_RATE)
         _, sample_rate, n_frames = read_wav(Path(str(output_wav_path)))
         return TTSArtifact(
             wav_path=Path(str(output_wav_path)),
@@ -134,6 +133,14 @@ def _waveform_to_samples(waveform: list[float]) -> list[int]:
     return waveform_to_mono_pcm16(waveform)
 
 
+@lru_cache(maxsize=1)
+def _fake_tts_samples() -> tuple[int, ...]:
+    """Cache the immutable PCM payload; each engine call still writes a new WAV."""
+
+    frames = SAMPLE_RATE * 8  # 8.00 s, a non-empty WAV
+    return tuple(_waveform_to_samples(_synthetic_waveform(frames)))
+
+
 # Spoken-character index at which the injects a measurable pause, just before
 # the comma in the smoke text (between "的" and "往").
 _SPEKEN_INDEX_OF_PAUSE = 16
@@ -142,7 +149,7 @@ _SPEKEN_INDEX_OF_PAUSE = 16
 # --- positive path ----------------------------------------------------------
 
 
-def test_full_chain_runs_and_passes_all_e2e_properties(tmp_path: Path) -> None:
+def test_successful_chain_preserves_all_e2e_properties(tmp_path: Path) -> None:
     artifacts = run_chain(
         run_dir=tmp_path,
         text=TEXT,
@@ -150,24 +157,12 @@ def test_full_chain_runs_and_passes_all_e2e_properties(tmp_path: Path) -> None:
         align_engine=_FakeAlignerEngine(),
     )
 
-    # Every artifact was produced.
+    # Artifact production and fresh TTS WAV format.
     assert artifacts.raw_wav_path.is_file()
     assert artifacts.alignment_path.is_file()
     assert artifacts.final_wav_path.is_file()
     assert artifacts.adjusted_alignment_path.is_file()
     assert artifacts.srt_path.is_file()
-
-    # Model output is checked structurally here; validate_e2e asserts the rest.
-    validate_e2e(artifacts)
-
-
-def test_fresh_tts_wav_is_valid_mono_pcm16(tmp_path: Path) -> None:
-    artifacts = run_chain(
-        run_dir=tmp_path,
-        text=TEXT,
-        wav_engine=_FakeTTSEngine(),
-        align_engine=_FakeAlignerEngine(),
-    )
     assert artifacts.raw_wav_sample_rate == SAMPLE_RATE
     assert artifacts.raw_wav_frames == SAMPLE_RATE * 8
     # read_wav only accepts mono 16-bit PCM, so a successful read is the assertion.
@@ -175,38 +170,16 @@ def test_fresh_tts_wav_is_valid_mono_pcm16(tmp_path: Path) -> None:
     assert (frame_rate, frames) == (SAMPLE_RATE, SAMPLE_RATE * 8)
     assert len(samples) == frames
 
-
-def test_alignment_consumes_the_fresh_tts_wav(tmp_path: Path) -> None:
-    artifacts = run_chain(
-        run_dir=tmp_path,
-        text=TEXT,
-        wav_engine=_FakeTTSEngine(),
-        align_engine=_FakeAlignerEngine(),
-    )
+    # Alignment consumed the exact fresh WAV and covered all spoken characters.
     assert artifacts.alignment_sample_rate == artifacts.raw_wav_sample_rate
     assert artifacts.alignment_frames == artifacts.raw_wav_frames
     assert artifacts.token_count == len(_ALIGNABLE)
     assert artifacts.token_count == len(artifacts.original_tokens)
 
-
-def test_raw_wav_unchanged_through_downstream(tmp_path: Path) -> None:
-    artifacts = run_chain(
-        run_dir=tmp_path,
-        text=TEXT,
-        wav_engine=_FakeTTSEngine(),
-        align_engine=_FakeAlignerEngine(),
-    )
     # Re-reading the raw WAV after the whole run yields the original snapshot.
     assert snapshot_wav(artifacts.raw_wav_path)[1] == artifacts.raw_wav_digest
 
-
-def test_postprocess_frame_timing_invariants(tmp_path: Path) -> None:
-    artifacts = run_chain(
-        run_dir=tmp_path,
-        text=TEXT,
-        wav_engine=_FakeTTSEngine(),
-        align_engine=_FakeAlignerEngine(),
-    )
+    # Postprocess frame and rate invariants.
     trim = artifacts.trim
     assert trim is not None
     assert trim.frame_rate == artifacts.raw_wav_sample_rate
@@ -216,16 +189,7 @@ def test_postprocess_frame_timing_invariants(tmp_path: Path) -> None:
     assert trim.kept_frames > 0
     assert trim.trim_before >= 0 and trim.trim_after >= 0
 
-
-def test_adjusted_alignment_preserves_text_order_durations_and_gaps(
-    tmp_path: Path,
-) -> None:
-    artifacts = run_chain(
-        run_dir=tmp_path,
-        text=TEXT,
-        wav_engine=_FakeTTSEngine(),
-        align_engine=_FakeAlignerEngine(),
-    )
+    # Adjusted alignment preserves token text, durations, and inter-token gaps.
     original = artifacts.original_tokens
     adjusted = artifacts.adjusted_tokens
     assert original and adjusted
@@ -248,14 +212,7 @@ def test_adjusted_alignment_preserves_text_order_durations_and_gaps(
         gap_new = adjusted[index + 1].start - adjusted[index].end
         assert gap_new == pytest.approx(gap_old)
 
-
-def test_captions_reconstruct_source_text_and_srt_is_valid(tmp_path: Path) -> None:
-    artifacts = run_chain(
-        run_dir=tmp_path,
-        text=TEXT,
-        wav_engine=_FakeTTSEngine(),
-        align_engine=_FakeAlignerEngine(),
-    )
+    # Captions reconstruct the source text and emitted SRT stays within WAV.
     assert artifacts.captions
     joined = "".join(caption.text for caption in artifacts.captions)
     assert "".join(joined.split()) == "".join(TEXT.split())
@@ -270,6 +227,9 @@ def test_captions_reconstruct_source_text_and_srt_is_valid(tmp_path: Path) -> No
     for block in blocks:
         assert block["start"] < block["end"]
         assert block["end"] <= final_duration + 1e-6
+
+    # The harness owns the remaining whole-chain properties.
+    validate_e2e(artifacts)
 
 
 # --- negatives: the harness must fail, not silently pass --------------------
