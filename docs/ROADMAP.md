@@ -47,6 +47,14 @@ The agent-facing speech CLI is complete via
 It exposes static validation and the existing speech renderer; see the
 [CLI contract](dev/render-entry-point.md#command-line).
 
+Reusable Qwen3-TTS Base normal-ICL voice cloning is complete via
+[PR #13](https://github.com/Yang-Zhaowei/media-pipeline/pull/13), merged on
+2026-10-04, closing
+[Issue #12](https://github.com/Yang-Zhaowei/media-pipeline/issues/12).
+The owner accepted real asset creation, fresh-process reuse, two utterance
+outputs, and human voice identity / consistency. See the
+[closure evidence](validation/voice-clone-closure.md).
+
 ## Next gate: real workflow evaluation
 
 Speech Pipeline v0 is complete. Stop speculative feature development and

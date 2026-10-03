@@ -96,14 +96,24 @@ demo's unversioned payload; demo exports must not be relabeled without
 validated checkpoint metadata. Assets are runtime outputs and must not be
 committed as regression fixtures.
 
-## Owner merge gate: real ai-core acceptance
+## Recorded real ai-core acceptance
 
-No real clone synthesis or human acceptance is recorded by this change.
-Read-only inventory found an existing `Qwen3-TTS-12Hz-1.7B-Base` checkpoint;
-its config declares `base`, `qwen3_tts_tokenizer_12hz`, `1b7`, speaker embedding
-dimension 2048, and 16 codebooks. This is availability evidence, not a load
-test. Required checkpoint: `Qwen/Qwen3-TTS-12Hz-1.7B-Base` with its speech
-tokenizer. Do not download or alter the runtime to satisfy this gate silently.
+The owner reported acceptance on 2026-10-04 for exact PR #13 HEAD
+`8d14639976c7bdcf4d2c1a6ddce3d9b7672cc200`; PR #13 is merged and Issue #12
+is closed. With PyTorch `2.14.0+cu130`, `qwen-tts 0.1.1`, and an RTX 4070,
+the real-torch serialization suite passed (3 tests), `voice.pt` was created
+and loaded in a fresh process, and both utterances were generated. Human
+listening accepted recognizable cloned identity and acceptable consistency.
+See the [owner closure evidence](../validation/voice-clone-closure.md) for
+tensor properties, exact WAV metadata, and provenance. This documentation
+update did not rerun these checks.
+
+## Replaying the two-process acceptance
+
+Required checkpoint: `Qwen/Qwen3-TTS-12Hz-1.7B-Base` with its speech tokenizer.
+The recorded Base config declares `qwen3_tts_tokenizer_12hz`, `1b7`, speaker
+embedding dimension 2048, and 16 codebooks. Use the existing checkpoint;
+do not silently download models or alter the runtime for a replay.
 
 On ai-core, check out the exact PR HEAD in a clean tree and use its existing
 TTS virtual environment. Set `PYTHONPATH` to that checkout's `src`, and supply
@@ -178,5 +188,5 @@ Expected layout: `voice.pt`, `utterance-1.wav`, `utterance-2.wav`, and
 `artifacts.json` in the chosen run directory. Both WAVs must be production
 mono PCM16 and yield positive `TTSArtifact` durations. Record exact HEAD,
 runtime versions, commands/results, and human listening against the real
-reference. The owner must confirm recognizable, acceptably consistent voice
-identity across both different utterances before merging.
+reference. Human listening must confirm recognizable, acceptably consistent
+voice identity across both different utterances for each new acceptance run.

@@ -42,16 +42,24 @@ Manual listening check passed.
 
 ### Base voice cloning (Issue #12)
 
-Read-only inventory on 2026-10-04 found `qwen-tts 0.1.1` in the existing TTS
-environment and `Qwen3-TTS-12Hz-1.7B-Base` under the existing TTS model root.
-The installed prompt API and checkpoint config were inspected without loading
-the Base model or running inference. Base config reports a 2048-dimensional
-speaker embedding and 16 codebooks. This does not establish real clone or
-human acceptance.
+Owner-reported real ai-core acceptance was recorded on 2026-10-04 for exact
+PR #13 HEAD `8d14639976c7bdcf4d2c1a6ddce3d9b7672cc200`, then squash merged
+as `aa27f97b849c2aabae507f3769a59166d44d3ce0`.
 
-The independent runtime, safe CPU asset format, and exact two-process owner
-merge-gate commands are in the [voice-clone runtime notes](voice-clone-runtime.md).
-No model download or environment changes were performed.
+Runtime: PyTorch `2.14.0+cu130`, `qwen-tts 0.1.1`, NVIDIA GeForce RTX 4070,
+and the existing `Qwen3-TTS-12Hz-1.7B-Base` checkpoint. Real-torch
+serialization tests passed (3 tests). The owner successfully created
+`voice.pt`, loaded it in a fresh process, generated both utterance WAVs,
+and accepted recognizable cloned identity with acceptable consistency.
+
+The saved reference codes are `[443, 16]`, int64 on CPU; the speaker embedding
+is `[2048]`, bfloat16 on CPU. Outputs are 24000 Hz: 109440 frames / 4.56 s
+and 159360 frames / 6.64 s.
+
+See the [closure evidence](../validation/voice-clone-closure.md) and
+[runtime notes / replay commands](voice-clone-runtime.md). These results were
+provided by the owner; this documentation update did not rerun inference,
+serialization tests, or listening, and made no runtime environment changes.
 
 ### Forced Alignment
 

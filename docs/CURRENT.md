@@ -32,15 +32,24 @@ suite (334 passed, 6 GPU integration tests skipped). The owner marked both
 merge gates complete in PR #11: a real ai-core CLI render and human acceptance.
 This documentation closure does not rerun those CPU or GPU checks.
 
-## Current work
+## Reusable Base voice-clone runtime
 
-[Issue #12](https://github.com/Yang-Zhaowei/media-pipeline/issues/12) adds an
-independent Qwen3-TTS Base normal-ICL voice-clone runtime and safely reusable
-local tensor assets. The CustomVoice renderer and speech CLI remain unchanged.
-See the [runtime contract and exact owner acceptance commands](dev/voice-clone-runtime.md).
-Real ai-core clone generation, fresh-process reuse, and human voice-identity
-acceptance remain owner merge gates; checkpoint/API inventory alone is not
-GPU validation.
+[Issue #12](https://github.com/Yang-Zhaowei/media-pipeline/issues/12) is closed
+via [PR #13](https://github.com/Yang-Zhaowei/media-pipeline/pull/13), squash
+merged on 2026-10-04. The independent Qwen3-TTS 12Hz Base normal-ICL runtime
+creates reusable local CPU tensor assets and produces production-compatible
+mono PCM16 `TTSArtifact` outputs. CustomVoice, the renderer, and the speech CLI
+remain unchanged.
+
+The owner reported real ai-core acceptance at exact PR HEAD
+`8d14639976c7bdcf4d2c1a6ddce3d9b7672cc200`: real-torch serialization tests
+(3 passed), asset creation, fresh-process loading, two utterance outputs, and
+human acceptance of recognizable cloned identity and acceptable consistency.
+See the [closure evidence](validation/voice-clone-closure.md) and
+[runtime contract / replay commands](dev/voice-clone-runtime.md).
+This documentation update does not rerun those checks.
+
+## Current work
 
 [Issue #8](https://github.com/Yang-Zhaowei/media-pipeline/issues/8) remains open
 for production-use validation of long-form narration stability using existing

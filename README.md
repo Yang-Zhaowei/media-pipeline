@@ -48,6 +48,13 @@ The agent-facing speech CLI is complete in
 [PR #11](https://github.com/Yang-Zhaowei/media-pipeline/pull/11);
 [Issue #10](https://github.com/Yang-Zhaowei/media-pipeline/issues/10) is closed.
 
+Reusable Qwen3-TTS Base voice cloning is complete via
+[PR #13](https://github.com/Yang-Zhaowei/media-pipeline/pull/13), closing
+[Issue #12](https://github.com/Yang-Zhaowei/media-pipeline/issues/12), with
+owner-confirmed real ai-core and human acceptance. See the
+[runtime contract](docs/dev/voice-clone-runtime.md) and
+[closure evidence](docs/validation/voice-clone-closure.md).
+
 [Issue #8](https://github.com/Yang-Zhaowei/media-pipeline/issues/8) remains open
 to validate long-form narration stability in production.
 See the [current state](docs/CURRENT.md) and [podcast pilot workflow](docs/workflows/podcast-pilot.md).
