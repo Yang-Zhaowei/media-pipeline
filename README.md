@@ -12,6 +12,21 @@ The production path uses four components: TTS, forced alignment, audio
 postprocessing, and caption compilation. Real ai-core validation and human
 listening passed in [PR #9](https://github.com/Yang-Zhaowei/media-pipeline/pull/9).
 
+Install the command from a checkout with `python -m pip install -e .` (or
+`uv sync`), then run a static preflight or render a new run directory:
+
+```console
+media-pipeline speech validate speech.json
+media-pipeline speech render speech.json --output new-run-dir
+```
+
+Use an activated virtual environment; with `uv sync`, prefix the commands with
+`uv run`.
+
+The CLI prints a UTF-8 JSON result for inspection and automation. See the
+[CLI contract](docs/dev/render-entry-point.md#command-line) for its output,
+exit codes, and runtime options.
+
 ## Authoring speech
 
 The Python interface `render_speech(...)` accepts a script already divided
