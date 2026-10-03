@@ -34,6 +34,14 @@ This documentation closure does not rerun those CPU or GPU checks.
 
 ## Current work
 
+[Issue #12](https://github.com/Yang-Zhaowei/media-pipeline/issues/12) adds an
+independent Qwen3-TTS Base normal-ICL voice-clone runtime and safely reusable
+local tensor assets. The CustomVoice renderer and speech CLI remain unchanged.
+See the [runtime contract and exact owner acceptance commands](dev/voice-clone-runtime.md).
+Real ai-core clone generation, fresh-process reuse, and human voice-identity
+acceptance remain owner merge gates; checkpoint/API inventory alone is not
+GPU validation.
+
 [Issue #8](https://github.com/Yang-Zhaowei/media-pipeline/issues/8) remains open
 for production-use validation of long-form narration stability using existing
 tools.
