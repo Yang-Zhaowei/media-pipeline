@@ -44,6 +44,10 @@ See the [render entry point](docs/dev/render-entry-point.md) and
 
 ## Project status
 
+The agent-facing speech CLI is complete in
+[PR #11](https://github.com/Yang-Zhaowei/media-pipeline/pull/11);
+[Issue #10](https://github.com/Yang-Zhaowei/media-pipeline/issues/10) is closed.
+
 [Issue #8](https://github.com/Yang-Zhaowei/media-pipeline/issues/8) remains open
 to validate long-form narration stability in production.
 See the [current state](docs/CURRENT.md) and [podcast pilot workflow](docs/workflows/podcast-pilot.md).

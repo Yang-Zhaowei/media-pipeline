@@ -12,6 +12,8 @@ Completed:
 PR #9 adds caller-approved performance units and per-segment instructions.
 Real ai-core validation and human listening passed. Issue #8 remains open for
 production-use validation of long-form narration stability.
+The agent-facing speech CLI is complete (PR #11; Issue #10 closed).
+Its validation/render contract is in `docs/dev/render-entry-point.md`.
 Closure evidence: `docs/validation/speech-v0-closure.md` (PR #5).
 Next: evaluate one real podcast production using existing tools first; see
 `docs/workflows/podcast-pilot.md`. This evaluation does not authorize new features.

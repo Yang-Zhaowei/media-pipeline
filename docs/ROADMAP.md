@@ -19,7 +19,7 @@ operation. It reuses complete existing capabilities first, and adapts or
 builds only the remaining demonstrated gap, stopping once the gap is
 closed.
 
-## Completed milestone
+## Completed milestones
 
 Speech Pipeline v0 closed on 2026-09-29 via PR #5 and human acceptance.
 See [recorded evidence](validation/speech-v0-closure.md).
@@ -39,6 +39,13 @@ Listening and synchronization are checked, and CPU regressions remain green.
 
 No new modality, invocation surface, NLE integration, or orchestration
 is required to close this milestone.
+
+The agent-facing speech CLI is complete via
+[PR #11](https://github.com/Yang-Zhaowei/media-pipeline/pull/11), merged on
+2026-10-03, closing
+[Issue #10](https://github.com/Yang-Zhaowei/media-pipeline/issues/10).
+It exposes static validation and the existing speech renderer; see the
+[CLI contract](dev/render-entry-point.md#command-line).
 
 ## Next gate: real workflow evaluation
 
@@ -91,13 +98,12 @@ reserved for input rules, timing, format conversion, and verification.
 
 These are not roadmap milestones:
 
-- easier Speech invocation;
 - media inspection/extraction;
 - ASR;
 - Vision / media search;
 - timeline interchange;
 - NLE integration;
-- CLI / MCP / HTTP;
+- MCP / HTTP;
 - orchestration.
 
 Each must first pass the Feature admission rule with reproducible evidence

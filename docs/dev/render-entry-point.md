@@ -56,6 +56,13 @@ A complete run publishes `final/final.wav`, `final/final.srt` and
 
 [PR #9](https://github.com/Yang-Zhaowei/media-pipeline/pull/9) is merged. Real
 ai-core generation, human listening and subtitle synchronization passed.
+[PR #11](https://github.com/Yang-Zhaowei/media-pipeline/pull/11) is merged and
+[Issue #10](https://github.com/Yang-Zhaowei/media-pipeline/issues/10) is closed.
+The owner marked the real ai-core CLI render and human acceptance merge gates
+complete in PR #11. Recorded CPU validation and closure status are in
+[CURRENT](../CURRENT.md#agent-facing-speech-cli); this documentation update
+does not rerun model integration.
+
 [Issue #8](https://github.com/Yang-Zhaowei/media-pipeline/issues/8) remains open
 for production-use validation of long-form narration stability.
 

@@ -19,16 +19,20 @@ ai-core validation and human listening passed. Historical evidence remains in
 the [pipeline closure](validation/speech-v0-closure.md) and
 [segmented-render acceptance](validation/segmented-speech-v0-acceptance.md).
 
-## Current work
+## Agent-facing speech CLI
 
-[Issue #10](https://github.com/Yang-Zhaowei/media-pipeline/issues/10) adds a
-standard `media-pipeline speech` console entry point for static script
-validation and rendering, using the existing Python entry points. CPU
-validation on 2026-10-03 passed: 44 focused CLI tests and the full regression
-suite (334 passed, 6 GPU integration tests skipped). See the
-[CLI contract](dev/render-entry-point.md#command-line).
-An ai-core real CLI render and any required human acceptance remain owner merge
-gates. No GPU validation is claimed here.
+[Issue #10](https://github.com/Yang-Zhaowei/media-pipeline/issues/10) is closed
+via [PR #11](https://github.com/Yang-Zhaowei/media-pipeline/pull/11), merged on
+2026-10-03. The standard `media-pipeline speech` console entry point provides
+static script validation and rendering through the existing Python APIs.
+See the [CLI contract](dev/render-entry-point.md#command-line).
+
+Recorded CPU validation passed: 44 focused CLI tests and the full regression
+suite (334 passed, 6 GPU integration tests skipped). The owner marked both
+merge gates complete in PR #11: a real ai-core CLI render and human acceptance.
+This documentation closure does not rerun those CPU or GPU checks.
+
+## Current work
 
 [Issue #8](https://github.com/Yang-Zhaowei/media-pipeline/issues/8) remains open
 for production-use validation of long-form narration stability using existing

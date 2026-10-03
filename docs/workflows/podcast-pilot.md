@@ -21,8 +21,8 @@ arbitrary-manuscript-to-episode operation.
 | Research, topic, outline | External research / writing tools and human review | Choose topic, audience, source material and chapter structure; retain source links |
 | Narration script | External writing tools | Separate spoken text from headings, citations and stage directions; review pronunciations and approve segment boundaries |
 | Voice selection | `CustomVoiceRequest(text, language, speaker, instruct)` and runtime speaker/language discovery | Select a supported voice and audition actual script material; only Chinese / Uncle_Fu has the recorded E2E acceptance |
-| WAV + SRT per utterance | Existing production APIs and verified chain | Supply real text / voice through a small production-specific call site; the validation driver fixes its text and speaker |
-| Whole-episode speech | No long-script splitting or episode assembly | First try manually approved short segments and existing assembly tools; only implement a small helper if that exposes a reproducible gap |
+| Speech invocation | `media-pipeline speech validate` and `speech render` ([CLI contract](../dev/render-entry-point.md#command-line)) | Author `speech.json`, review its performance-unit plan, and supply the existing runtime configuration |
+| Whole-episode speech | Existing renderer assembles caller-approved units into WAV + SRT + timeline | Choose and approve unit boundaries; evaluate long-form production stability under Issue #8 |
 | HTML visual pages | External HTML authoring and browser rendering | Produce PNGs for static pages or video/frame sequences for animations; HTML itself is not an encoded video asset |
 | Chapter timing | Per-utterance audio and alignment timing | Record chapter/segment start and end from final audio frame counts, including inserted pauses |
 | Final video | External FFmpeg or chosen NLE | Combine rendered pages/clips, narration and subtitles; review timing, loudness, resolution and final export |
@@ -51,20 +51,22 @@ alternate spoken/display text is not an existing feature.
    utterances. Keep stable chapter/segment names so one paragraph can be revised
    without rewriting the entire episode.
 3. Audition the selected speaker on a real paragraph, then run the existing
-   speech stages for each accepted segment. A narrowly scoped call site may
-   pass script text, speaker and instruction into those APIs; do not repurpose
-   or overwrite the immutable smoke fixture to supply user input.
+   `media-pipeline speech validate speech.json` command. Review the plan, then
+   use `media-pipeline speech render speech.json --output <new_run_dir>` with
+   the existing runtime configuration. The caller authors the units and
+   instructions; the CLI preserves them.
 4. Use the produced audio durations to place each visual page. Maintain a small
    editing sheet: chapter, segment, script file, visual file, WAV, SRT, start,
    end and inter-segment pause. It can be a plain table, not a new schema or
    workflow engine. Generate visual content from the outline, but finalize its
    timing only after audio exists.
-5. Assemble with the chosen tool. For a standalone episode WAV + SRT, concatenate
-   compatible audio and shift each segment's captions by its cumulative final
-   audio start. Renumber subtitle cues. Never concatenate SRT text files without
-   shifting their timestamps.
-6. Revise one paragraph, regenerate that segment, recalculate later offsets,
-   and export again. Accept the trial only after full listening and visual /
+5. Use the renderer's `final/final.wav`, `final/final.srt`, and
+   `final/timeline.json` to assemble the video with the chosen finishing tool.
+   The renderer already assembles speech and shifts captions by integer-frame
+   offsets; use the final timeline to place visuals.
+6. Revise one paragraph in the authored script, validate and render into a new
+   run directory, update visual timing from the new timeline, and export again.
+   Accept the trial only after full listening and visual /
    subtitle synchronization review of the final encoded video.
 
 For a common audio sample rate `R`, segment `i` begins at
@@ -98,10 +100,10 @@ References: [FFmpeg filters](https://ffmpeg.org/ffmpeg-filters.html),
 
 ## Decision after the pilot
 
-The first likely friction is supplying real script/voice parameters; the next
-is repeatable segment assembly with correct subtitle offsets. These are
-candidate small improvements, not approved scope. Measure them in the real
-trial, reuse existing tools first, and stop once the demonstrated gap is closed.
+Script invocation and speech assembly are available through the existing CLI
+and renderer. Evaluate their use in the real trial, including long-form
+stability and revision handling. Any remaining reproducible gap must pass the
+feature admission rule; reuse existing tools first and stop once it is closed.
 
 No HTTP, MCP, ASR, Vision, generic orchestration, job queue, environment
 consolidation, HTML renderer, or NLE integration is proposed for this repository.
