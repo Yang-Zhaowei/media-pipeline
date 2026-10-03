@@ -40,6 +40,19 @@ duration:    6.88 s
 
 Manual listening check passed.
 
+### Base voice cloning (Issue #12)
+
+Read-only inventory on 2026-10-04 found `qwen-tts 0.1.1` in the existing TTS
+environment and `Qwen3-TTS-12Hz-1.7B-Base` under the existing TTS model root.
+The installed prompt API and checkpoint config were inspected without loading
+the Base model or running inference. Base config reports a 2048-dimensional
+speaker embedding and 16 codebooks. This does not establish real clone or
+human acceptance.
+
+The independent runtime, safe CPU asset format, and exact two-process owner
+merge-gate commands are in the [voice-clone runtime notes](voice-clone-runtime.md).
+No model download or environment changes were performed.
+
 ### Forced Alignment
 
 Environment:
