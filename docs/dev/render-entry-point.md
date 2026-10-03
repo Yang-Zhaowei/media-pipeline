@@ -1,49 +1,14 @@
-# Render entry point (`render_speech`)
+# Speech rendering
 
-## Status
+`render_speech(...)` turns a caller-authored script into one episode WAV, SRT
+and timeline. The caller defines coherent performance units and any explicit
+direction. A unit may contain multiple sentences; subtitle boundaries are
+determined independently by Alignment and the Caption Compiler.
 
-`render_speech` is the merged pre-segmented render entry point (PR #7). PR #7's
-real ai-core multi-segment run, load-once instrumentation and recorded human
-acceptance are historical evidence; see the [acceptance review](../validation/segmented-speech-v0-acceptance.md)
-and [project state](../CURRENT.md). Issue #8's per-segment instruction change
-has separate pending ai-core GPU and human listening merge gates.
+## Script
 
-## Purpose
-
-A single synchronous Python call renders a **pre-segmented** script to one
-episode WAV + matching SRT in a `run_dir/`:
-
-```python
-from media_pipeline import render_speech, load_and_validate_script, RenderError
-
-render_speech(
-    script_path="script.json",        # validated up front, never rewritten
-    output_dir="run_dir",             # must not already exist
-    tts_python="python",
-    alignment_python="python",
-    tts_model="/models/qwen3-tts",
-    alignment_model="/models/qwen3-forced-aligner",
-    max_segment_chars=200,
-)
-```
-
-It is **not** a full-manuscript interface. Automatic long-script splitting,
-full-manuscript authoring, and exact numeric speed/pitch control are out of
-scope. The caller (including an upper-level Agent) approves coherent performance
-units and decides where explicit direction is needed. Each `segment` is one
-unit, may contain multiple sentences, and produces one TTS request. Subtitle
-segmentation remains independent and is determined by Alignment and the Caption
-Compiler.
-
-Top-level `instruct` remains optional and defaults to `""`. For ordinary
-narration, omit it or set it to `""`; do not add a boilerplate style
-instruction. Use an instruction only as an explicit
-directing signal for a requested emotion, emphasis, contrast, or performance
-change. The top-level instruction remains available for whole-render direction.
-An omitted segment instruction inherits that top-level value, including its
-empty default; explicit `""` clears inherited direction, and a non-empty string
-overrides it. Presence controls resolution, so empty strings are meaningful and
-strings are passed verbatim. Non-string values, including `null`, are rejected.
+Ordinary narration omits `instruct` or uses `""`. A segment can inherit the
+top-level instruction, explicitly clear it, or provide local direction.
 
 ```json
 {
@@ -58,105 +23,40 @@ strings are passed verbatim. Non-string values, including `null`, are rejected.
 }
 ```
 
-In the example, `opening` inherits the top-level direction, `plain` explicitly
-clears it, and `emphasis` supplies a local direction. Omitting the top-level
-field is equivalent to its default `""` and is the recommended ordinary
-narration input.
+Here `opening` inherits, `plain` clears, and `emphasis` overrides the direction.
+`pause_after_ms` optionally adds a pause after a unit. Instructions must be
+strings; unknown fields are rejected. See the
+[instruction contract](../contracts/performance-unit-instruct.md).
 
-## Inputs
+## Render
 
-- `script_path`: JSON validated by `load_and_validate_script(...)`.
-- `max_segment_chars`: positive integer, the hard per-segment cap. Segments over
-  the cap are rejected (never truncated).
-- `tts_python` / `alignment_python` / `tts_model` / `alignment_model`: the model
-  stage interpreter, model path, and stage model path.
+```python
+from media_pipeline import render_speech
 
-Internal seams (injected in tests, real in production):
-
-- `device`: runtime device; the recorded real validation used `cuda:0`.
-- `_wav_task` / `_align_task`: the two one-shot stage callables. Production
-  parent imports stay portable; model-runtime imports happen inside the stage
-  subprocesses. Production code does not depend on `tests/`.
-
-## Instruction request and report fields
-
-`request.json` records the normalized top-level `instruct` default. A segment's
-`instruct` is recorded only when the caller explicitly supplied it, preserving
-the distinction between inheritance and explicit clearing. `report.json`
-records each segment's `effective_instruct` and `instruct_source` (`segment` or
-`top_level`); the latter also identifies use of the empty top-level default.
-These fields describe resolved request provenance, not proof of audible model
-delivery. Unknown fields remain rejected.
-
-## Lifecycle
-
-One model load per stage, run once as separate subprocesses:
-
-```
-TTS stage (subprocess, one model load)   → per-segment raw WAVs + manifest
-Alignment stage (subprocess, one load)   → per-segment raw alignment
-Audio Postprocess + Caption Compiler     → cleaned WAV + adjusted alignment + captions
-Integer-frame assembly + SRT             (in-process, deterministic)
+render_speech(
+    script_path="script.json",
+    output_dir="run_dir",
+    tts_python="<TTS Python path>",
+    alignment_python="<Alignment Python path>",
+    tts_model="<TTS model path>",
+    alignment_model="<Alignment model path>",
+    max_segment_chars=200,
+)
 ```
 
-No per-segment model lifecycle and never two models resident in one process.
+Use the verified [ai-core runtime setup](core-runtime.md). The output directory
+must be new. `max_segment_chars` is the caller's per-unit limit; over-budget
+text is rejected, never truncated. Invalid scripts fail before generation.
 
-## Failure semantics (contract C5)
+A complete run publishes `final/final.wav`, `final/final.srt` and
+`final/timeline.json`. `request.json` preserves the authored instruction choices;
+`report.json` records their effective values and run status.
 
-- **Preflight** static faults (unknown/duplicate fields, over-max, non-string
-  ids, bool pause/budget, etc.) raise `RenderError` **before any model loads**;
-  the input file is never rewritten.
-- **Run-level faults** raise `RenderError` (with `run_dir`): model/CUDA/
-  subprocess faults, TTS synthesis failures, invalid segment WAVs, sample-rate
-  mismatch, and the final product verification failure. No catch-all continue.
-- **Per-segment deterministic faults** (alignment, postprocess, caption) are
-  recorded with `segment_id`/`stage`/`reason`; independent segments continue.
-  The result is `incomplete`, with intermediate artifacts retained and all
-  final paths `None`. No shortened episode or successful-episode groups publish.
-- A failed run never leaves a valid `.complete` marker; a completed run writes
-  `.complete` last.
+## Validation and next step
 
-## Timeline & assembly (contract C7)
+[PR #9](https://github.com/Yang-Zhaowei/media-pipeline/pull/9) is merged. Real
+ai-core generation, human listening and subtitle synchronization passed.
+[Issue #8](https://github.com/Yang-Zhaowei/media-pipeline/issues/8) remains open
+for production-use validation of long-form narration stability.
 
-- Integer-frame accumulation: `O_i = Σ (N_j + G_j)` for `j < i`, with
-  `G_i = half_up(pause_after_ms_i · R / 1000)`.
-- Global caption time = local caption time + `O_i / R`.
-- Only the cleaned WAV **data frames** are concatenated; the header is rewritten for
-  the assembled length and sample rate. SRT is rendered only at the end with the
-  existing half-up rules.
-- Millisecond SRT endpoints allow at most 0.5 ms rounding plus floating-point
-  tolerance beyond the audio boundary; offsets accumulate integer frames.
-
-## Output layout (contract C6)
-
-```
-run_dir/
-  request.json          validated request values, with defaults materialized
-  report.json           manifest of segment statuses
-  segments/<name>.wav                 per-segment raw WAV
-  segments/<name>.alignment.raw.json
-  segments/<name>.alignment.adjusted.json
-  segments/<name>.cleaned.wav
-  .final.staging/        staged WAV/SRT/timeline, re-read before publication
-  final/                artifacts copied after staging validation
-    final.wav
-    final.srt
-    timeline.json
-    .complete           completion marker, written last
-```
-
-## Testing
-
-`tests/test_render.py` exercises the deterministic render path on CPU (no CUDA)
-with injectable fake model engines, including lifecycle, failure, timeline,
-caption, output-directory, and completion-marker behavior. PR #7's ai-core
-generation, load-once instrumentation, and human acceptance are historical
-evidence in the [acceptance review](../validation/segmented-speech-v0-acceptance.md).
-For Issue #8, the current focused and full CPU validation results are recorded
-in the PR body; CPU checks do not establish audible delivery. A successful
-report and `final/.complete` are required: an interrupted publication can leave
-unfinished files in `final/`.
-
-**ai-core GPU validation: pending owner** and **human listening acceptance:
-pending owner**; both are merge gates. PR #7's historical acceptance does not
-satisfy them.
+The renderer does not automatically split, interpret or rewrite the manuscript.

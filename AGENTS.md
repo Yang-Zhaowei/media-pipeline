@@ -9,6 +9,9 @@ Completed:
 - Audio Postprocess v0
 - Production TTS v0
 - Production Alignment v0
+PR #9 adds caller-approved performance units and per-segment instructions.
+Real ai-core validation and human listening passed. Issue #8 remains open for
+production-use validation of long-form narration stability.
 Closure evidence: `docs/validation/speech-v0-closure.md` (PR #5).
 Next: evaluate one real podcast production using existing tools first; see
 `docs/workflows/podcast-pilot.md`. This evaluation does not authorize new features.

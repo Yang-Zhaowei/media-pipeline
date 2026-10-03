@@ -1,139 +1,47 @@
 # Media Pipeline
 
-Local-first AI-assisted media processing pipeline for turning scripts and media assets into reusable, NLE-ready artifacts.
+Local-first tools for turning caller-authored scripts into speech and subtitles.
 
-## Status
-
-Early development.
-
-**Speech Pipeline v0 is complete.** The production path is:
+## Speech pipeline
 
 ```text
-text
-→ TTS
-→ forced alignment
-→ audio post-processing
-→ caption compilation
-→ WAV + SRT
+text → TTS → forced alignment → audio postprocess → captions → WAV + SRT
 ```
 
-Completed production components:
+The production path uses four components: TTS, forced alignment, audio
+postprocessing, and caption compilation. Real ai-core validation and human
+listening passed in [PR #9](https://github.com/Yang-Zhaowei/media-pipeline/pull/9).
 
-- Caption Compiler v0
-- Audio Postprocess v0
-- Production TTS v0
-- Production Alignment v0
+## Authoring speech
 
-PR #5 validated fresh Production TTS output through every subsequent production
-stage on `ai-core`. The final WAV and SRT passed automated checks and human
-listening / synchronization acceptance. See the
-[closure evidence](docs/validation/speech-v0-closure.md).
+The Python interface `render_speech(...)` accepts a script already divided
+into caller-approved performance units. A unit may contain multiple sentences
+and is sent as one TTS request. The caller chooses unit boundaries and any
+directing instructions; the pipeline does not segment or interpret the script.
 
-See [`docs/CURRENT.md`](docs/CURRENT.md) for the current project state.
+Ordinary narration uses an empty instruction by default. A segment can inherit
+the top-level instruction, explicitly clear it, or provide its own direction.
+Subtitle boundaries are determined independently by alignment and caption
+compilation.
 
-## What is usable today
+See the [render entry point](docs/dev/render-entry-point.md) and
+[performance-unit contract](docs/contracts/performance-unit-instruct.md).
 
-The Python production interfaces accept caller-authored speech segments with
-`text`, `language`, a model-supported `speaker`, and an optional `instruct`.
-Each segment is one caller-approved performance unit and may contain multiple
-sentences; it is sent as one TTS request. The caller (including an upper-level
-Agent) chooses the unit boundaries and any directing signals. For ordinary
-narration, omit `instruct` or use `""`; do not add boilerplate direction.
-Segment instructions can inherit, clear, or override the top-level instruction;
-see the [render entry-point docs](docs/dev/render-entry-point.md). Alignment and
-the Caption Compiler continue to determine subtitle boundaries independently.
-Only the recorded Chinese / `Uncle_Fu` case has full E2E acceptance; other
-voices and scripts need their own listening check.
+## Project status
 
-`render_speech(...)` renders a **pre-segmented** script (a fixed script with
-fixed segments/speaker) to a single episode WAV + SRT in one synchronous
-call; see [render entry-point docs](docs/dev/render-entry-point.md). It is not
-a full-manuscript interface: there is no automatic long-script splitting,
-no full-manuscript entry point, and no exact numeric speed / pitch control.
-Voice cloning and VoiceDesign are not implemented. `python -m media_pipeline`
-only compiles existing text and alignment into SRT.
+[Issue #8](https://github.com/Yang-Zhaowei/media-pipeline/issues/8) remains open
+to validate long-form narration stability in production.
+See the [current state](docs/CURRENT.md) and [podcast pilot workflow](docs/workflows/podcast-pilot.md).
 
-[`validation/speech_pipeline_e2e.py`](validation/speech_pipeline_e2e.py) is a
-repeatable validation driver with a fixed reviewed script and speaker, not an
-arbitrary-script product interface. It uses the two existing GPU environments;
-see [validation instructions](validation/README.md).
+Project scope and future proposals are described in the [roadmap](docs/ROADMAP.md).
+Runtime setup is documented in [core runtime notes](docs/dev/core-runtime.md).
 
-For a chapter-based podcast video, see the
-[first-production workflow assessment](docs/workflows/podcast-pilot.md).
+Pure processing and unit tests run without CUDA. Real model integration is
+validated separately on ai-core; see [validation instructions](validation/README.md).
 
-PR #7's real ai-core multi-segment generation, load-once instrumentation, and
-recorded human acceptance remain historical evidence; see the
-[acceptance review](docs/validation/segmented-speech-v0-acceptance.md). Issue #8
-adds a separate production contract for per-segment direction. Its ai-core GPU
-validation and human listening acceptance are pending owner and are merge gates;
-CPU checks do not establish acoustic continuity or resolve Issue #8.
+## Development
 
-## Design Direction
-
-The project separates:
-
-- model inference from deterministic media processing;
-- portable project logic from host-specific GPU runtimes;
-- development and unit testing from GPU integration testing.
-
-The repository currently includes portable deterministic processing and model-facing contracts, plus isolated host-specific runtime adapters for Qwen3-TTS and Qwen3 ForcedAligner under `media_pipeline.runtimes`.
-
-```
-Production TTS = production code
-Production Alignment = production code
-Forced Aligner runtime = ai-core GPU adapter, separate from pure processing
-```
-
-Pure processing components should run without CUDA and remain portable across Windows, Linux, and macOS.
-
-## Roadmap
-
-After closing Speech Pipeline v0, evaluate one real production, including a
-revision and final export. Reuse existing authoring, browser rendering, FFmpeg
-or NLE capabilities first. Add project code only for a reproducible gap that
-passes the [feature admission rule](docs/ROADMAP.md).
-
-HTTP, MCP, ASR, Vision, NLE automation, environment consolidation, and generic
-orchestration are not committed next milestones.
-
-## Repository Layout
-
-```text
-docs/
-  CURRENT.md          Current milestone and project state
-  validation/         Recorded milestone acceptance evidence
-  workflows/          Real-production assessment and boundaries
-  dev/                Verified development/runtime environment notes
-  legacy/             Historical architecture references
-
-experiments/
-  GPU smoke tests that have already been validated
-
-src/
-  media_pipeline/
-    portable contracts and deterministic processing
-    runtimes/          Model/runtime-specific adapters
-
-tests/
-  fixtures/           Real model outputs used as regression evidence
-
-validation/
-  speech_pipeline_e2e.py  Two-environment real-runtime validation driver
-```
-
-## Development Model
-
-Development is performed on the client workstation.
-
-Most logic is developed and tested locally without GPU dependencies. GPU-specific integration is validated separately on `ai-core`.
-
-Real regression fixtures are kept in the repository so deterministic components can be developed without repeatedly invoking AI models.
-
-## Agent Development
-
-Repository-wide instructions for coding agents are in [`AGENTS.md`](AGENTS.md).
-
-Agents should also read [`docs/CURRENT.md`](docs/CURRENT.md) before continuing active development.
+Repository guidance for contributors and agents is in [AGENTS.md](AGENTS.md).
 
 ## License
 
