@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "corpus_id": "accepted-clone-three-sections-v1",
+  "source": "PR #15 accepted script at 798f26d7efb60b552483df812d7ca0362732784c",
+  "language": "Chinese",
+  "join_separator": " ",
+  "units": [
+    {"id": "opening", "text": "欢迎收听今天的节目。我们先从一个具体的问题开始。"},
+    {"id": "discussion", "text": "面对复杂的信息，我们需要认真核对事实，再作出自己的判断。"},
+    {"id": "closing", "text": "感谢你的收听。下一期节目，我们继续讨论这个话题。"}
+  ]
+}
