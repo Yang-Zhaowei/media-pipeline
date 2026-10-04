@@ -10,3 +10,7 @@ dist/
 build/
 .env
 .env.*
+
+# Local research downloads and generated diagnostic artifacts are never evidence fixtures.
+.tmp-research/
+experiments/clone_prosody/artifacts/

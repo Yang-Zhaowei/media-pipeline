@@ -72,6 +72,12 @@ This documentation closure did not rerun those checks.
 for production narration stability, including the accepted clone render's
 remaining cross-segment emotion/delivery drift. Evaluate with existing tools.
 
+An active Draft experiment adds [Qwen-only Layer 1 diagnostic infrastructure](validation/qwen-clone-prosody-v0.md)
+for that question: repeated separate-call, true-batch, continuous-text and
+sampling-off conditions. Production speech behavior is unchanged. CPU/fake
+validation does not establish a root cause; the exact-head ai-core experiment
+and blind human listening remain pending owner. This is not a roadmap milestone.
+
 See the [podcast pilot workflow](workflows/podcast-pilot.md) and
 [project roadmap](ROADMAP.md). Runtime setup is in [core runtime notes](dev/core-runtime.md).
 
