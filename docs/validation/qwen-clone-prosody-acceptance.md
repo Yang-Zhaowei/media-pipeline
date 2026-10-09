@@ -77,7 +77,7 @@ contents and their hashes were not independently checked in this closure.
 
 The following table preserves all supplied scores and explicit drift labels.
 Sample identifiers refer to the full-matrix blind package, not the earlier smoke.
-Individual repetition IDs were not supplied and are not inferred.
+Sample-to-repetition assignments were not supplied and are not inferred.
 
 | Sample | Condition | Score / 5 | Drift |
 | --- | --- | ---: | --- |
@@ -123,8 +123,9 @@ one owner and a small corpus, not a statistically validated ranking.
 
 **H1 — Sampling stochasticity.** The owner reports measurable run-to-run
 variation in default conditions and matching acoustic summary metrics for
-greedy repetitions. Matching summaries do not establish exact PCM identity;
-hash comparison remains owner-side work. Sampling contributes to output variation,
+greedy repetitions. Final owner verification confirmed identical `listening.wav`
+PCM within each greedy repeat pair in this fixed environment (details below).
+Sampling contributes to output variation,
 but disabling it alone did not eliminate perceived delivery changes: both
 S3-greedy samples were rated 4/5 with Mild drift.
 
@@ -147,7 +148,7 @@ multi-minute podcast narration or exclude instability at longer durations.
 The hidden greedy pairs received matching subjective evaluations: L1-greedy
 5/5 with None drift in both entries; S3-greedy 4/5 with Mild drift in both.
 This is encouraging within-session consistency, not a formal listener-reliability
-or hearing assessment. Potentially identical greedy outputs must not be counted
+or hearing assessment. The confirmed identical listening PCM must not be counted
 as independent evidence of generation diversity.
 
 The real ai-core experiment and owner blind listening provide promising
@@ -157,19 +158,33 @@ to output variation, but disabling sampling does not independently eliminate
 perceived delivery changes. The finding is exploratory and does not establish
 the optimal production unit length or resolve Issue #8.
 
-## Limits and outstanding owner-side verification
+## Final owner PCM verification — PASS
+
+In the complete 13-run ai-core experiment directory, the owner computed SHA256
+over the WAV PCM frame data of each pair's `listening.wav` and also compared
+WAV format metadata. Both greedy repeat comparisons passed:
+
+| Condition | Repeat pair | PCM identical | SHA256 of listening PCM (both repeats) |
+| --- | --- | --- | --- |
+| S3-greedy | S3-G-1 / S3-G-2 | True — PASS | `0601e9d93b004cf951b0fdf5486c61ddd67f04c911b48c60360b9bb7f675e57c` |
+| L1-greedy | L1-G-1 / L1-G-2 | True — PASS | `dbdd94cf7458309590a7e96cd7a9afc8b359b553f194c41bbd3b4e1b42935905` |
+
+Both pairs produced byte-identical listening PCM in this fixed environment.
+Their hidden-repeat owner blind scores and drift labels were also consistent
+within each pair: S3-greedy 4/5 with Mild drift; L1-greedy 5/5 with None drift.
+Repeated identical audio is not independent evidence of generation diversity.
+These hashes cover PCM frame data, not complete WAV-file bytes; no per-unit
+hashes or additional format values are inferred. This is owner-reported
+verification, not an independently recomputed agent result. It does not establish
+cross-platform determinism or resolve Issue #8.
+
+## Limits and remaining production validation
 
 Natural paragraph prosody can legitimately vary in pitch, intensity and timing.
 Neither the owner's qualitative comments nor descriptive acoustic summaries
 are automated emotion measurements. No objective pitch values or statistical
 significance are inferred here. Raw zero-gap segmented concatenation and L1
 continuous generation also differ from production postprocessing and pauses.
-
-PCM hash comparison remains pending, particularly for the S3-greedy and
-L1-greedy repeat pairs. Compare the owner-held per-output PCM hashes separately
-from complete WAV-file hashes before claiming byte identity or independent
-generation diversity. This closure supplies no hash values and does not claim
-that comparison occurred.
 
 The remaining production-validation question is: what caller-approved continuous
 unit length preserves desired continuity in actual multi-minute podcast narration,

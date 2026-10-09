@@ -79,7 +79,8 @@ S3 GPU smoke, all 13 matrix runs and blind listening of all 13 samples.
 Continuous generation showed promising perceived continuity for the roughly
 15-second corpus; context reset is the strongest current engineering hypothesis,
 with concatenation/topology confounds. Sampling-off alone did not eliminate
-delivery changes. PCM hash comparison and multi-minute stability remain open.
+delivery changes. Owner PCM comparison passed for both greedy listening repeat
+pairs in the fixed environment; multi-minute stability remains open.
 PR #16 remains Draft; Issue #8 continues as production-use validation, without
 an established root cause or optimal unit length. Production speech behavior
 is unchanged. This documentation closure did not rerun tests, GPU synthesis or

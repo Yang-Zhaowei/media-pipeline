@@ -316,8 +316,9 @@ provider are part of this experiment. CPU/fake tests validate orchestration,
 files, provenance, analysis and failure behavior; they provide no model-quality
 or GPU evidence. The owner completed the exact-head real run and blind listening
 at the implementation HEAD recorded above. The [acceptance document](qwen-clone-prosody-acceptance.md)
-records those owner-reported results and the remaining PCM-hash and production
-length questions. This documentation closure did not repeat the run or listening.
+records those owner-reported results, the final PASS for both greedy listening
+PCM repeat comparisons in the fixed environment, and the remaining production
+length question. This documentation closure did not repeat the run or listening.
 
 ## CPU validation executed
 
