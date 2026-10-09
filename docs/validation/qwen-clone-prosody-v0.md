@@ -1,12 +1,17 @@
 # Qwen3-TTS Base Clone Prosody Stability Experiment v0
 
-Status: Draft diagnostic infrastructure for [Issue #8](https://github.com/Yang-Zhaowei/media-pipeline/issues/8).
-No real ai-core experiment or human listening has been executed for this PR;
-no cause or remedy is established. Production speech behavior is unchanged.
+Status: Layer 1 infrastructure accepted through owner-reported ai-core execution
+and blind listening; [PR #16](https://github.com/Yang-Zhaowei/media-pipeline/pull/16)
+remains Draft and [Issue #8](https://github.com/Yang-Zhaowei/media-pipeline/issues/8)
+remains open. See the [acceptance evidence and qualified findings](qwen-clone-prosody-acceptance.md).
+No definitive cause or remedy is established. Production speech behavior is unchanged.
 
 Starting main: `238901170096cd14f5d6b950b4d84e4663603600`.
 Branch: `experiment/issue8-qwen-clone-prosody-v0`.
-Use the exact current Draft PR HEAD for execution, not this starting commit.
+GPU-tested implementation: `506b30dd59702348d6ff11bc7fad435acddf3a76`.
+Later documentation commits are not themselves GPU-tested. The existing
+procedure below checks the selected current Draft PR HEAD for a new run;
+record that HEAD separately from the accepted implementation and starting main.
 
 ## Question and controls
 
@@ -309,8 +314,10 @@ PYTHONPATH="$PWD/src:$PWD" python -m experiments.clone_prosody blind --output "$
 No caption alignment, postprocessing, production-schema changes or new model
 provider are part of this experiment. CPU/fake tests validate orchestration,
 files, provenance, analysis and failure behavior; they provide no model-quality
-or GPU evidence. The owner gate remains the exact-head real run and completed
-listening review above.
+or GPU evidence. The owner completed the exact-head real run and blind listening
+at the implementation HEAD recorded above. The [acceptance document](qwen-clone-prosody-acceptance.md)
+records those owner-reported results and the remaining PCM-hash and production
+length questions. This documentation closure did not repeat the run or listening.
 
 ## CPU validation executed
 
@@ -337,5 +344,6 @@ The four focused skips are three real-torch serialization checks (torch absent)
 and one Windows symlink privilege check. The full suite additionally skips six
 unconfigured GPU integration tests. Experiment tests include matrix/lifecycle,
 fake full-path analysis/blinding, stale-root refusal, partial failures and marker
-invalidation. No real ai-core GPU A/B experiment was executed. No human listening
-result or root cause is claimed.
+invalidation. These original Windows CPU checks did not include real ai-core
+GPU A/B execution or human listening. The subsequent [owner-reported acceptance](qwen-clone-prosody-acceptance.md)
+is separate evidence; no definitive root cause is claimed.
