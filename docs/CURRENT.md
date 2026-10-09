@@ -72,6 +72,20 @@ This documentation closure did not rerun those checks.
 for production narration stability, including the accepted clone render's
 remaining cross-segment emotion/delivery drift. Evaluate with existing tools.
 
+The owner accepted the [Qwen-only Layer 1 experiment](validation/qwen-clone-prosody-acceptance.md)
+at implementation HEAD `506b30dd59702348d6ff11bc7fad435acddf3a76`: Linux tests
+(82 experiment-focused; 328 clone/render/CLI; full suite 633 passed, 6 skipped),
+S3 GPU smoke, all 13 matrix runs and blind listening of all 13 samples.
+Continuous generation showed promising perceived continuity for the roughly
+15-second corpus; context reset is the strongest current engineering hypothesis,
+with concatenation/topology confounds. Sampling-off alone did not eliminate
+delivery changes. Owner PCM comparison passed for both greedy listening repeat
+pairs in the fixed environment; multi-minute stability remains open.
+PR #16 remains Draft; Issue #8 continues as production-use validation, without
+an established root cause or optimal unit length. Production speech behavior
+is unchanged. This documentation closure did not rerun tests, GPU synthesis or
+listening, and is not a roadmap milestone.
+
 See the [podcast pilot workflow](workflows/podcast-pilot.md) and
 [project roadmap](ROADMAP.md). Runtime setup is in [core runtime notes](dev/core-runtime.md).
 
