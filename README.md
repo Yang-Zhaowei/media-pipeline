@@ -7,28 +7,21 @@ environments.
 
 ## Install and use
 
-Install the built wheel into a clean Controller environment from the release
-artifact. This does not require PyPI or a source checkout:
+Install a verified local wheel once on Client with `uv tool`, using uv-managed
+Python; see [installation and PATH discovery](docs/deployment.md#client-installation-and-authoring).
+Then use the shared CLI from any content project:
 
 ```console
-python -m pip install --no-index --no-deps ./regrain-0.1.0-py3-none-any.whl
 regrain --help
 regrain --version
 regrain speech validate speech.json
 regrain speech render speech.json --output new-run-dir
 ```
 
-For development, install an editable checkout with `python -m pip install -e .`.
-The `media-pipeline` command remains as a thin compatibility alias; the Python
-import namespace remains `media_pipeline`. Existing `MEDIA_PIPELINE_*` runtime
-configuration and its precedence are unchanged. See the [naming decision](docs/naming.md).
-
-The `validate` command performs static validation without loading models or
-changing the input. Rendering coordinates separate TTS and Alignment Python
-interpreters, then runs deterministic postprocessing, caption compilation and
-publication in the Controller. Install the Controller separately from both
-GPU runtime environments. The [CLI contract](docs/dev/render-entry-point.md)
-documents results, exit codes, runtime settings and child interpreter setup.
+`validate` checks the script without models or input changes. `render` uses Core's
+existing runtimes. The [CLI/input contract](docs/dev/render-entry-point.md) defines
+runtime settings, outputs and errors; [naming](docs/naming.md) defines retained
+`media_pipeline` imports, the `media-pipeline` alias and configuration compatibility.
 
 ## Speech workflow
 
@@ -44,10 +37,8 @@ required voice assets are transferred manually to ai-core for
 for revisual, FFmpeg or NLE finishing. regrain does not depend on revisual.
 
 The reusable [speech-authoring Skill](skills/regrain-speech/SKILL.md) helps
-Agents author inputs and run the official validator. To use it on different
-Agent hosts, copy the Skill folder to that host's configured Skills location or
-load `SKILL.md` directly where supported. Discovery paths vary by host; regrain
-does not install it globally.
+Agents author inputs and run the official validator. Use one shared Skill copy;
+host discovery is configured as described in the deployment guide.
 
 ## Release and deployment
 
@@ -63,21 +54,15 @@ commit identities remain historical references.
 
 ## Existing production evidence
 
-Speech Pipeline v0 has passed real ai-core rendering and human listening /
-subtitle synchronization acceptance. Production TTS, alignment, postprocess,
-caption compilation, clone rendering and prosody diagnostics are documented in
-the [current evidence index](docs/CURRENT.md). Issue #8 remains open for
-production-use validation of long-form narration stability; the release
-candidate does not claim to resolve it.
-
-Pure processing and unit tests run without CUDA. GPU integration is validated
-separately on ai-core; see [validation instructions](validation/README.md).
+The [current state and evidence](docs/CURRENT.md) distinguish accepted speech
+capabilities, original candidate owner GPU/Client acceptance, and the remaining
+Issue #8 Clone/long-form consistency question. Rebuilt wheels need their own
+exact-artifact acceptance. CPU checks run separately from real GPU verification.
 
 ## Development
 
-Contributor and Agent guidance is in [AGENTS.md](AGENTS.md). The distribution is
-named `regrain`; the supported Python import namespace remains `media_pipeline`
-for compatibility with the accepted APIs.
+Contributor and Agent guidance is in [AGENTS.md](AGENTS.md). For development,
+install an editable checkout with `python -m pip install -e .` or `uv sync`.
 
 ## License
 

@@ -1,11 +1,9 @@
 # Client / Core installation and rollback
 
-The v0.1.0 wheel is a lightweight Controller with no required third-party runtime
-dependencies. TTS and alignment still execute in their **existing separate model
-environments**. Workers load only the Controller's exact `media_pipeline` package
-directory; its surrounding site-packages is not forwarded. Neither worker needs
-another regrain installation. Use Python 3.10 or newer for the Controller and
-workers; the accepted Core runtime uses Python 3.12.
+Use Python 3.10+ (accepted Core runtime: 3.12). Install the Controller separately
+from the existing TTS and Aligner environments; neither worker needs another
+regrain installation. See the [runtime/CLI contract](dev/render-entry-point.md)
+for package loading and [release gates](release.md) for exact-artifact acceptance.
 
 Keep the development checkout, versioned Controller environments, model environments,
 checkpoints, private voice assets and episode directories separate. For example:
@@ -27,30 +25,43 @@ checkpoint download or GPU process management is automated by regrain.
 
 ## Client installation and authoring
 
-Obtain the reviewed wheel and matching release manifest. Check its SHA256 against
-the manifest before installing. In PowerShell, from a directory outside the checkout:
+Use one shared CLI installed from the verified local wheel via
+[uv tools](https://docs.astral.sh/uv/concepts/tools/), with
+[uv-managed Python](https://docs.astral.sh/uv/guides/install-python/). No global
+Python or per-Agent/per-content-project regrain installation is needed. Compare
+the hash with the matching manifest first; in PowerShell outside the checkout:
 
 ```powershell
 Get-FileHash ./regrain-0.1.0-py3-none-any.whl -Algorithm SHA256
-py -3.12 -m venv ./regrain-0.1.0-client
-./regrain-0.1.0-client/Scripts/python.exe -m pip install --no-index --no-deps ./regrain-0.1.0-py3-none-any.whl
-./regrain-0.1.0-client/Scripts/regrain.exe --version
-./regrain-0.1.0-client/Scripts/regrain.exe speech validate ./episode/speech.json
+uv python install 3.12
+uv tool install --managed-python --python 3.12 --no-index ./regrain-0.1.0-py3-none-any.whl
+regrain --version
+regrain speech validate ./episode/speech.json
 ```
 
-On Linux/macOS use `python3 -m venv` and the environment's `bin/python` and
-`bin/regrain`. No development PYTHONPATH is needed. Use the [speech-authoring Skill](../skills/regrain-speech/SKILL.md)
-to turn an approved manuscript into approved Performance Units. The installed wheel
-also contains that folder at `media_pipeline/skills/regrain-speech`; find it with:
+An Agent subprocess may retain an old PATH after installation. Restart the host
+process, or invoke the absolute executable path without reinstalling:
 
-```console
-python -c "from importlib.resources import files; print(files('media_pipeline').joinpath('skills/regrain-speech'))"
+```powershell
+$regrainExe = Join-Path (uv tool dir --bin) 'regrain.exe'
+& $regrainExe --version
+& $regrainExe speech validate ./episode/speech.json
 ```
 
-Run this using the installed Controller's Python. Copy the complete folder to the
-Agent host's supported Skill discovery location or register/load its SKILL.md
-directly. Host discovery paths differ. Confirm the host can read its examples;
-do not assume copying a folder enables it in every host.
+Keep one reusable [regrain-speech folder](../skills/regrain-speech/SKILL.md),
+including examples, in a compatible Agent Skills discovery location. Codex and Pi
+can consume that same copy when configured to discover it; otherwise register its
+path with each host. The owner's Client uses `C:\Users\zhaowei\.agents\skills\regrain-speech`.
+Other hosts may use different paths. The wheel also ships this folder under
+`media_pipeline/skills/regrain-speech`. Confirm host discovery and validator access;
+the [reported Client acceptance](validation/regrain-v0.1.0-owner-acceptance.md)
+does not prove all hosts' discovery mechanisms.
+
+For a Client update, verify the new wheel/manifest, then use the same local-wheel
+install command with `--reinstall` (also for same-version candidate changes).
+Retain the previous verified wheel/manifest for rollback by reinstalling that
+wheel. Refresh the shared Skill from the selected version and restart hosts as
+needed. Do not edit uv's tool environment with pip. No development PYTHONPATH is needed.
 
 Review the validator's JSON plan and obtain human approval of the exact input.
 Manually transfer speech.json and authorized clone assets while preserving their
@@ -80,8 +91,7 @@ unset PYTHONPATH PYTHONHOME
 ```
 
 Keep the manifest alongside the versioned installation for source/hash provenance.
-Use a shell where a failed command stops the procedure (`set -e`), or check each
-command's result before continuing. Do not reuse an existing candidate directory.
+Stop on command failure and do not reuse an existing candidate directory.
 
 Use the accepted runtime paths and existing checkpoints, for example:
 
@@ -102,8 +112,10 @@ The unset aliases above avoid the established legacy alignment precedence;
 explicit CLI paths also take precedence. Preserve the owner's desired local
 configuration rather than changing global environment files.
 
-**Required GPU gate:** both installed-CLI renders must run on ai-core with the
-accepted separate interpreters and real assets/checkpoints. Record the wheel
+**Required GPU gate for the selected artifact:** both installed-CLI renders run
+on ai-core with the accepted separate interpreters and real assets/checkpoints.
+The [original owner acceptance](validation/regrain-v0.1.0-owner-acceptance.md)
+does not transfer to a rebuilt wheel. Record the wheel
 SHA256, source commit, runtime/model/asset identities, command, exit code and
 report. Check `complete`, every segment, one model load per stage, final WAV/SRT/
 timeline, voice identity, transitions, and human listening/subtitle sync. Use

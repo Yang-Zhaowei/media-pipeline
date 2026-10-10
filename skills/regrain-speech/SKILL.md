@@ -9,7 +9,7 @@ Create UTF-8 `speech.json` from an approved manuscript, then run the installed R
 
 ## Build the script
 
-Choose coherent Performance Units based on meaning, delivery, and natural transitions. A unit may contain several sentences; do not automatically make each sentence a unit. The default maximum is **200 Unicode code points per unit**, including whitespace and punctuation. This is a caller-side preflight budget, not an acoustic or model limit. Keep each unit within the budget; never silently split, truncate, rewrite, or omit text. Ask for approval before changing proposed boundaries or wording when that is needed to fit.
+Prefer coherent, multi-sentence Performance Units for short, connected narration when they fit the approved budget. Do not split mechanically at every sentence: introduce units for meaningful semantic, performance, revision, or structural reasons. This is authoring guidance, not a validation rule; final boundaries need human approval. The default ceiling is **200 Unicode code points per unit**, including whitespace and punctuation, not an optimal length or model limit. Never silently merge, split, truncate, rewrite, or omit approved text; seek approval for needed changes.
 
 Keep spoken words in `text`. Put explicit, caller-approved delivery direction in `instruct`. Keep production notes, edit instructions, and visual direction outside `speech.json`; they are not spoken text or renderer controls. Subtitle segmentation is produced independently by alignment and caption compilation, so Performance Unit boundaries do not prescribe subtitle boundaries.
 
