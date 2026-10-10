@@ -1,0 +1,22 @@
+{
+  "language": "Chinese",
+  "speaker": "Uncle_Fu",
+  "instruct": "自然、清晰地讲述。",
+  "segments": [
+    {
+      "id": "opening",
+      "text": "欢迎收听本期节目。今天我们讨论一个具体问题。",
+      "pause_after_ms": 250
+    },
+    {
+      "id": "plain-detail",
+      "text": "先从背景说起，再看它带来的影响。",
+      "instruct": ""
+    },
+    {
+      "id": "emphasis",
+      "text": "最后，记住这个关键结论。",
+      "instruct": "强调最后一句。"
+    }
+  ]
+}

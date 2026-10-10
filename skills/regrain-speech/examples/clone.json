@@ -1,0 +1,22 @@
+{
+  "language": "Chinese",
+  "voice": {
+    "type": "clone",
+    "asset": "voices/approved-voice.pt"
+  },
+  "segments": [
+    {
+      "id": "opening",
+      "text": "欢迎收听本期节目。今天我们讨论一个具体问题。"
+    },
+    {
+      "id": "explanation",
+      "text": "先从背景说起，再看它带来的影响。",
+      "instruct": ""
+    },
+    {
+      "id": "closing",
+      "text": "最后，我们回到最初的问题。"
+    }
+  ]
+}

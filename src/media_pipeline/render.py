@@ -32,7 +32,6 @@ from __future__ import annotations
 import hashlib
 import json
 import math
-import os
 import re
 import subprocess
 from dataclasses import dataclass, field
@@ -85,12 +84,10 @@ _TIMING_TOLERANCE = 1e-6
 #: boundary check, never to tolerate accumulated drift.
 _SRT_MS_TOLERANCE = 0.5
 
-# Absolute path to this repository's ``src/`` directory, resolved portably from
-# the location of this module. The embedded model stages run in their own
-# interpreters; importing ``media_pipeline`` from here (rather than depending on
-# a venv's installed copy) guarantees the subprocess runs the current checkout
-# of the production code -- see contract C4/C8.
-_SRC = Path(__file__).resolve().parent.parent
+# Absolute path to this installed package, resolved from this module. The
+# embedded model stages load this exact package without adding its parent to
+# ``sys.path`` (which could shadow dependencies in the runtime environment).
+_PACKAGE_DIR = Path(__file__).resolve().parent
 
 # The public callable signature: ``task_dict -> results_dict`` (one model stage,
 # one model load, all segments in a single session). Kept as an optional internal
@@ -1366,10 +1363,9 @@ def _run_model_stage(
     The model stage is launched exactly once per run. The stage writes the
     per-segment result manifest itself; the parent only reads it.
 
-    The child runs in an isolated interpreter environment with this checkout's
-    ``src/`` prepended to ``PYTHONPATH`` (C4/C8): it imports the current
-    production ``media_pipeline`` code regardless of whether the interpreter's
-    venv has ``media_pipeline`` installed, stale or not.
+    The child bootstraps this exact ``media_pipeline`` package by file location
+    (C4/C8), regardless of whether the interpreter's venv has another copy
+    installed. Its environment and dependency search paths remain the worker's.
 
     The structured manifest is read before deciding on failure (C5): the child
     writes it and then exits non-zero even on a per-segment fault, so the
@@ -1390,14 +1386,24 @@ def _run_model_stage(
             json.dumps({"args": list(args), "manifest": str(manifest_file)}),
             encoding="utf-8",
         )
-        # Run the current checkout independent of the interpreter's venv state.
-        env = dict(os.environ)
-        env["PYTHONPATH"] = str(_SRC) + os.pathsep + env.get("PYTHONPATH", "")
+        # Pin the Controller package itself, without exposing its parent (which
+        # may contain unrelated top-level modules) on the worker's import path.
+        bootstrap = (
+            "import importlib.util, pathlib, sys\n"
+            f"_package_dir = pathlib.Path({str(_PACKAGE_DIR)!r})\n"
+            "_spec = importlib.util.spec_from_file_location(\n"
+            "    'media_pipeline', _package_dir / '__init__.py',\n"
+            "    submodule_search_locations=[str(_package_dir)],\n"
+            ")\n"
+            "_package = importlib.util.module_from_spec(_spec)\n"
+            "sys.modules['media_pipeline'] = _package\n"
+            "_spec.loader.exec_module(_package)\n"
+            + stage_script
+        )
         completed = subprocess.run(
-            [interpreter, "-c", stage_script, str(task_file)],
+            [interpreter, "-c", bootstrap, str(task_file)],
             capture_output=True,
             text=True,
-            env=env,
         )
 
         # Read the structured manifest the child wrote, regardless of exit code.

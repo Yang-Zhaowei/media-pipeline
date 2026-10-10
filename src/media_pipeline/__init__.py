@@ -1,4 +1,4 @@
-"""Media pipeline: deterministic, portable processing components.
+"""Regrain: deterministic, portable processing components.
 
 The speech pipeline is ``text -> TTS -> forced alignment -> audio postprocess ->
 caption compiler -> WAV + SRT``. It provides the portable caption compiler, the
@@ -127,4 +127,4 @@ __all__ = [
     "write_wav",
 ]
 
-__version__ = "0.0.0"
+__version__ = "0.1.0"

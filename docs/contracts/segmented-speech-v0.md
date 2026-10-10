@@ -1,8 +1,9 @@
 # Segmented Speech v0 — PR Feature Contract v1
 
-状态：用户确认的下一 PR 范围；本文是实施与审查的共同依据，不代表功能已经实现。
-规划基线：`main` 的 `795c4b6`。开始实施或审查时仍须核对实际仓库状态。
-建议 PR 标题：`feat: render pre-segmented scripts to WAV and SRT`。
+状态：历史原始设计合同；其中范围只描述当时的 Segmented Speech v0 PR，功能现已实现并经过接受。
+当前行为以 [`docs/dev/render-entry-point.md`](../dev/render-entry-point.md) 为准；后续 CLI、克隆音色和运行时细节以该文档及相应当前合同为准。
+本文保留原始边界和设计记录，不应被当作当前未实现状态或覆盖后续合同的依据。
+规划基线：`main` 的 `795c4b6`。建议 PR 标题：`feat: render pre-segmented scripts to WAV and SRT`。
 
 ## C1. 目标与边界
 

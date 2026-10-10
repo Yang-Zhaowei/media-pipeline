@@ -1,32 +1,20 @@
-# Media Pipeline
-Local-first AI-assisted media processing pipeline.
+# regrain
+Local-first media processing toolkit. Preserve the naming and compatibility
+boundary in `docs/naming.md` and the speech contracts in `docs/dev/render-entry-point.md`.
 ## Current state
-Speech Pipeline v0 is complete: the existing production components passed real
-ai-core E2E validation and human listening / subtitle synchronization acceptance.
-`text → TTS → forced alignment → audio postprocess → caption compiler → WAV + SRT`
-Completed:
-- Caption Compiler v0
-- Audio Postprocess v0
-- Production TTS v0
-- Production Alignment v0
-PR #9 adds caller-approved performance units and per-segment instructions.
-Real ai-core validation and human listening passed. Issue #8 remains open for
-production-use validation of long-form narration stability.
-The agent-facing speech CLI is complete (PR #11; Issue #10 closed).
-Its validation/render contract is in `docs/dev/render-entry-point.md`.
-Reusable Qwen3-TTS Base voice-clone runtime v0 is complete (PR #13; Issue #12 closed).
-Owner-reported real ai-core and human acceptance: `docs/validation/voice-clone-closure.md`.
-Segmented clone rendering is complete (PR #15; Issue #14 closed), with real
-ai-core and human acceptance: `docs/validation/clone-render-acceptance.md`.
-Cross-segment emotion/delivery drift remains tracked in Issue #8.
-Closure evidence: `docs/validation/speech-v0-closure.md` (PR #5).
-Next: evaluate one real podcast production using existing tools first; see
-`docs/workflows/podcast-pilot.md`. This evaluation does not authorize new features.
+`docs/CURRENT.md` owns accepted capabilities, historical evidence and open problems.
+PR #17 is in final closure for owner review; its original candidate has owner-reported
+GPU/runtime and Client Agent acceptance. Clone consistency and Issue #8 remain open.
+Never transfer acceptance to a rebuilt wheel: use `docs/release.md` and its exact-artifact gates.
+The owner controls Ready status, merge, release, repository rename and deployment.
 Do not add new modalities, NLE integration, general orchestration, or other scope unless explicitly requested.
 ## Repository evidence
 - `experiments/`: previously working GPU smoke tests; reference only.
 - `tests/fixtures/`: immutable real model outputs used for regression tests.
 - `docs/dev/core-runtime.md`: currently verified ai-core GPU environment.
+- `docs/validation/regrain-v0.1.0-owner-acceptance.md`: original candidate owner evidence and limits.
+- `docs/deployment.md`, `docs/release.md`: installation/rollback and release procedures.
+- `skills/regrain-speech/`: reusable Agent Skill for authoring and validating speech inputs.
 - `docs/legacy/`: historical architecture; not current requirements.
 ## Rules
 - Prefer deterministic processing over LLM decisions.

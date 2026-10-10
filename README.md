@@ -1,84 +1,68 @@
-# Media Pipeline
+# regrain
 
-Local-first tools for turning caller-authored scripts into speech and subtitles.
+Local-first, agent-friendly tools for turning caller-authored scripts into
+speech and subtitles. The v0.1.0 release candidate packages a lightweight
+Controller; PyTorch, `qwen-tts`, and `qwen-asr` stay in their existing runtime
+environments.
 
-## Speech pipeline
+## Install and use
 
-```text
-text → TTS → forced alignment → audio postprocess → captions → WAV + SRT
-```
-
-The production path uses four components: TTS, forced alignment, audio
-postprocessing, and caption compilation. Real ai-core validation and human
-listening passed in [PR #9](https://github.com/Yang-Zhaowei/media-pipeline/pull/9).
-
-Install the command from a checkout with `python -m pip install -e .` (or
-`uv sync`), then run a static preflight or render a new run directory:
+Install a verified local wheel once on Client with `uv tool`, using uv-managed
+Python; see [installation and PATH discovery](docs/deployment.md#client-installation-and-authoring).
+Then use the shared CLI from any content project:
 
 ```console
-media-pipeline speech validate speech.json
-media-pipeline speech render speech.json --output new-run-dir
+regrain --help
+regrain --version
+regrain speech validate speech.json
+regrain speech render speech.json --output new-run-dir
 ```
 
-Use an activated virtual environment; with `uv sync`, prefix the commands with
-`uv run`.
+`validate` checks the script without models or input changes. `render` uses Core's
+existing runtimes. The [CLI/input contract](docs/dev/render-entry-point.md) defines
+runtime settings, outputs and errors; [naming](docs/naming.md) defines retained
+`media_pipeline` imports, the `media-pipeline` alias and configuration compatibility.
 
-The CLI prints a UTF-8 JSON result for inspection and automation. See the
-[CLI contract](docs/dev/render-entry-point.md#command-line) for its output,
-exit codes, and runtime options.
+## Speech workflow
 
-## Authoring speech
+```text
+speech.json → validation → TTS → forced alignment → postprocess → captions
+            → WAV + SRT + timeline + report
+```
 
-The Python interface `render_speech(...)` accepts a script already divided
-into caller-approved performance units. A unit may contain multiple sentences
-and is sent as one TTS request. The caller chooses unit boundaries and any
-directing instructions; the pipeline does not segment or interpret the script.
+On PC_Client, an Agent prepares `speech.json`, runs `regrain speech validate`,
+and hands the validated plan to a human for approval. The approved input and
+required voice assets are transferred manually to ai-core for
+`regrain speech render`; the resulting artifacts are transferred back manually
+for revisual, FFmpeg or NLE finishing. regrain does not depend on revisual.
 
-CustomVoice narration uses an empty instruction by default. A segment can inherit
-the top-level instruction, explicitly clear it, or provide its own direction.
-Subtitle boundaries are determined independently by alignment and caption
-compilation.
+The reusable [speech-authoring Skill](skills/regrain-speech/SKILL.md) helps
+Agents author inputs and run the official validator. Use one shared Skill copy;
+host discovery is configured as described in the deployment guide.
 
-See the [render entry point](docs/dev/render-entry-point.md) and
-[performance-unit contract](docs/contracts/performance-unit-instruct.md).
+## Release and deployment
 
-Scripts can select a reusable clone asset with
-`"voice": {"type": "clone", "asset": "voices/voice.pt"}` instead of `speaker`.
-The asset path is relative to the script directory. Cloned voices require
-omitted or empty instructions; see the
-[voice-source contract](docs/dev/render-entry-point.md#reusable-cloned-voice).
+- [Client/Core deployment, verification, upgrade and rollback](docs/deployment.md)
+- [v0.1.0 release preparation and owner acceptance gates](docs/release.md)
+- [Project and package naming decisions](docs/naming.md)
+- [Current state](docs/CURRENT.md) and [roadmap](docs/ROADMAP.md)
 
-## Project status
+The repository is hosted at
+[Yang-Zhaowei/media-pipeline](https://github.com/Yang-Zhaowei/media-pipeline)
+while the owner prepares a repository rename to `regrain`. Existing PR and
+commit identities remain historical references.
 
-The agent-facing speech CLI is complete in
-[PR #11](https://github.com/Yang-Zhaowei/media-pipeline/pull/11);
-[Issue #10](https://github.com/Yang-Zhaowei/media-pipeline/issues/10) is closed.
+## Existing production evidence
 
-Reusable Qwen3-TTS Base voice cloning is complete via
-[PR #13](https://github.com/Yang-Zhaowei/media-pipeline/pull/13), closing
-[Issue #12](https://github.com/Yang-Zhaowei/media-pipeline/issues/12), with
-owner-confirmed real ai-core and human acceptance. See the
-[runtime contract](docs/dev/voice-clone-runtime.md) and
-[closure evidence](docs/validation/voice-clone-closure.md).
-
-Segmented clone rendering is complete via
-[PR #15](https://github.com/Yang-Zhaowei/media-pipeline/pull/15), closing Issue #14.
-Real ai-core and human acceptance are recorded in the
-[clone-render evidence](docs/validation/clone-render-acceptance.md).
-
-[Issue #8](https://github.com/Yang-Zhaowei/media-pipeline/issues/8) remains open
-for production narration stability, including cross-segment emotion/delivery drift.
-See the [current state](docs/CURRENT.md) and [podcast pilot workflow](docs/workflows/podcast-pilot.md).
-
-Project scope and future proposals are described in the [roadmap](docs/ROADMAP.md).
-Runtime setup is documented in [core runtime notes](docs/dev/core-runtime.md).
-
-Pure processing and unit tests run without CUDA. Real model integration is
-validated separately on ai-core; see [validation instructions](validation/README.md).
+The [current state and evidence](docs/CURRENT.md) distinguish accepted speech
+capabilities, original candidate owner GPU/Client acceptance, and the remaining
+Issue #8 Clone/long-form consistency question. Rebuilt wheels need their own
+exact-artifact acceptance. CPU checks run separately from real GPU verification.
 
 ## Development
 
-Repository guidance for contributors and agents is in [AGENTS.md](AGENTS.md).
+Contributor and Agent guidance is in [AGENTS.md](AGENTS.md). For development,
+install an editable checkout with `python -m pip install -e .` or `uv sync`.
 
 ## License
 

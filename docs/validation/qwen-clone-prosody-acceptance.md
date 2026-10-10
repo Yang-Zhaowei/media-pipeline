@@ -1,7 +1,8 @@
 # Qwen Base clone prosody experiment — owner acceptance
 
 Status: **Layer 1 experimental infrastructure accepted by the owner**.
-[PR #16](https://github.com/Yang-Zhaowei/media-pipeline/pull/16) remains Draft;
+[PR #16](https://github.com/Yang-Zhaowei/media-pipeline/pull/16) merged on
+2026-10-09T19:04:43Z at `ff73167436937b3788c297b11d9c4b67235c2f5d`;
 [Issue #8](https://github.com/Yang-Zhaowei/media-pipeline/issues/8) remains open.
 This records evidence and exploratory findings, not a production fix.
 
@@ -191,4 +192,4 @@ unit length preserves desired continuity in actual multi-minute podcast narratio
 while retaining acceptable pronunciation, natural paragraph progression and
 revision granularity? This is a question for later production-use validation,
 not authorization to change segmentation, sampling APIs, providers or models.
-PR #16 remains Draft, unmerged, and Issue #8 remains open.
+PR #16 is merged; Issue #8 remains open.
