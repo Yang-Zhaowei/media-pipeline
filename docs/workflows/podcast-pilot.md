@@ -6,6 +6,14 @@ small gaps need project code under the [admission rule](../ROADMAP.md).
 
 ## Intended workflow
 
+For production use, PC_Client authors `speech.json` and runs
+`regrain speech validate`. A human reviews and approves the plan; the approved
+script and required voice assets are then transferred manually to ai-core for
+`regrain speech render`. Transfer the resulting WAV, SRT, timeline and report
+back to PC_Client for revisual, FFmpeg or NLE finishing. The stable artifacts
+are the handoff contract; neither automatic transfer nor a revisual dependency
+is part of the Controller.
+
 Research and source notes -> topic discussion -> approved episode outline ->
 chapter scripts and HTML visual pages -> narration WAV + SRT -> rendered visual
 assets -> FFmpeg or NLE assembly -> reviewed final video.
@@ -21,7 +29,7 @@ arbitrary-manuscript-to-episode operation.
 | Research, topic, outline | External research / writing tools and human review | Choose topic, audience, source material and chapter structure; retain source links |
 | Narration script | External writing tools | Separate spoken text from headings, citations and stage directions; review pronunciations and approve segment boundaries |
 | Voice selection | `CustomVoiceRequest(text, language, speaker, instruct)` and runtime speaker/language discovery | Select a supported voice and audition actual script material; only Chinese / Uncle_Fu has the recorded E2E acceptance |
-| Speech invocation | `media-pipeline speech validate` and `speech render` ([CLI contract](../dev/render-entry-point.md#command-line)) | Author `speech.json`, review its performance-unit plan, and supply the existing runtime configuration |
+| Speech invocation | `regrain speech validate` and `speech render` ([CLI contract](../dev/render-entry-point.md#command-line)) | Author `speech.json`, review its performance-unit plan, and supply the existing runtime configuration |
 | Whole-episode speech | Existing renderer assembles caller-approved units into WAV + SRT + timeline | Choose and approve unit boundaries; evaluate long-form production stability under Issue #8 |
 | HTML visual pages | External HTML authoring and browser rendering | Produce PNGs for static pages or video/frame sequences for animations; HTML itself is not an encoded video asset |
 | Chapter timing | Per-utterance audio and alignment timing | Record chapter/segment start and end from final audio frame counts, including inserted pauses |
@@ -32,8 +40,10 @@ arbitrary-manuscript-to-episode operation.
 `speaker` selects a model-supported preset; `instruct` is a natural-language
 delivery instruction such as calm, clear narration at a moderate pace. It is
 not a promise of an exact speaking rate, pitch, emotion strength, or duration.
-The adapter exposes no numeric speed/pitch controls and no voice cloning or
-VoiceDesign. Those require separate demonstrated needs, not a v0 redesign.
+The CustomVoice adapter exposes no numeric speed/pitch controls or VoiceDesign.
+Reusable Base voice cloning is also accepted: select the relative clone asset
+through `voice` and omit instructions, as described in the
+[speech input contract](../dev/render-entry-point.md#reusable-cloned-voice).
 
 Start with one narrator. A full chapter may still need several short utterances;
 no supported maximum manuscript length has been established by the short E2E
@@ -47,12 +57,13 @@ alternate spoken/display text is not an existing feature.
    A proposed first trial is a 3-5 minute single-narrator video with three
    chapters and static visual pages. These sizes are trial choices, not model
    limits or product defaults.
-2. Approve the outline and script, then manually segment it into short, complete
-   utterances. Keep stable chapter/segment names so one paragraph can be revised
+2. Approve the outline and script, then choose semantically coherent Performance
+   Units, which may contain multiple sentences, within the agreed input budget.
+   Keep stable chapter/segment names so one paragraph can be revised
    without rewriting the entire episode.
 3. Audition the selected speaker on a real paragraph, then run the existing
-   `media-pipeline speech validate speech.json` command. Review the plan, then
-   use `media-pipeline speech render speech.json --output <new_run_dir>` with
+   `regrain speech validate speech.json` command. Review the plan, then
+   use `regrain speech render speech.json --output <new_run_dir>` with
    the existing runtime configuration. The caller authors the units and
    instructions; the CLI preserves them.
 4. Use the produced audio durations to place each visual page. Maintain a small

@@ -7,7 +7,7 @@ Status: planning / non-binding.
 
 ## Project role
 
-media-pipeline provides small, local-first, verifiable media operations
+regrain provides small, local-first, verifiable media operations
 only where real production workflows expose a concrete gap not adequately
 served by existing tools.
 
@@ -66,7 +66,7 @@ stability is tracked in Issue #8.
 Speech Pipeline v0 is complete. Stop speculative feature development and
 evaluate the owner's [podcast workflow](workflows/podcast-pilot.md).
 
-Use media-pipeline in one real short-form production with:
+Use regrain in one real short-form production with:
 
 - one actual finishing tool (FFmpeg or a target NLE, as requested by the owner);
 - one actual Agent host;
@@ -81,7 +81,7 @@ Try existing capabilities first:
 2. official APIs / extensions;
 3. maintained integrations / plugins;
 4. established tools and standards;
-5. media-pipeline custom code only for the remaining demonstrated gap.
+5. regrain custom code only for the remaining demonstrated gap.
 
 The evaluation ends with either:
 
@@ -96,7 +96,7 @@ A new feature requires:
 
 1. a real production input/problem;
 2. a reproducible inadequacy in existing solutions;
-3. evidence that media-pipeline is the correct ownership boundary;
+3. evidence that regrain is the correct ownership boundary;
 4. the smallest implementation that closes the gap;
 5. a stopping condition;
 6. consideration of maintenance cost and an exit/replacement path.

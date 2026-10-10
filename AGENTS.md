@@ -1,5 +1,8 @@
-# Media Pipeline
-Local-first AI-assisted media processing pipeline.
+# regrain
+Local-first AI-assisted media processing toolkit. The distribution and primary
+CLI are `regrain`; the supported Python import namespace stays `media_pipeline`.
+The `media-pipeline` CLI is a thin compatibility alias. Existing
+`MEDIA_PIPELINE_*` settings remain stable.
 ## Current state
 Speech Pipeline v0 is complete: the existing production components passed real
 ai-core E2E validation and human listening / subtitle synchronization acceptance.
@@ -19,14 +22,25 @@ Owner-reported real ai-core and human acceptance: `docs/validation/voice-clone-c
 Segmented clone rendering is complete (PR #15; Issue #14 closed), with real
 ai-core and human acceptance: `docs/validation/clone-render-acceptance.md`.
 Cross-segment emotion/delivery drift remains tracked in Issue #8.
+PR #16 merged on 2026-10-09T19:04:43Z at
+`ff73167436937b3788c297b11d9c4b67235c2f5d`. It adds Qwen Base clone prosody
+diagnostics; the owner reported 13 successful real GPU runs and blind-listening
+evidence. The exact GPU-tested implementation remains
+`506b30dd59702348d6ff11bc7fad435acddf3a76`; this historical evidence is not a
+claim that the current release candidate was GPU tested.
 Closure evidence: `docs/validation/speech-v0-closure.md` (PR #5).
-Next: evaluate one real podcast production using existing tools first; see
-`docs/workflows/podcast-pilot.md`. This evaluation does not authorize new features.
+Current objective: prepare the regrain v0.1.0 release candidate. Packaging and
+CPU validation are distinct from owner-side ai-core GPU acceptance. See
+`docs/release.md` and `docs/deployment.md`; Issue #8 remains open and is not
+part of this release-preparation scope. The podcast pilot remains useful for
+evaluating existing tools: `docs/workflows/podcast-pilot.md`.
 Do not add new modalities, NLE integration, general orchestration, or other scope unless explicitly requested.
 ## Repository evidence
 - `experiments/`: previously working GPU smoke tests; reference only.
 - `tests/fixtures/`: immutable real model outputs used for regression tests.
 - `docs/dev/core-runtime.md`: currently verified ai-core GPU environment.
+- `docs/naming.md`, `docs/deployment.md`, `docs/release.md`: current release decisions and owner procedures.
+- `skills/regrain-speech/`: reusable Agent Skill for authoring and validating speech inputs.
 - `docs/legacy/`: historical architecture; not current requirements.
 ## Rules
 - Prefer deterministic processing over LLM decisions.

@@ -2,7 +2,8 @@
 
 Status: Layer 1 infrastructure accepted through owner-reported ai-core execution
 and blind listening; [PR #16](https://github.com/Yang-Zhaowei/media-pipeline/pull/16)
-remains Draft and [Issue #8](https://github.com/Yang-Zhaowei/media-pipeline/issues/8)
+merged on 2026-10-09T19:04:43Z at
+`ff73167436937b3788c297b11d9c4b67235c2f5d`; [Issue #8](https://github.com/Yang-Zhaowei/media-pipeline/issues/8)
 remains open. See the [acceptance evidence and qualified findings](qwen-clone-prosody-acceptance.md).
 No definitive cause or remedy is established. Production speech behavior is unchanged.
 
@@ -10,7 +11,7 @@ Starting main: `238901170096cd14f5d6b950b4d84e4663603600`.
 Branch: `experiment/issue8-qwen-clone-prosody-v0`.
 GPU-tested implementation: `506b30dd59702348d6ff11bc7fad435acddf3a76`.
 Later documentation commits are not themselves GPU-tested. The existing
-procedure below checks the selected current Draft PR HEAD for a new run;
+procedure below checks an explicitly selected replay HEAD for a new run;
 record that HEAD separately from the accepted implementation and starting main.
 
 ## Question and controls
@@ -180,6 +181,15 @@ significance or an objective winner. The report does not announce a root
 cause, rank conditions, or solve Issue #8.
 
 ## Exact ai-core owner procedure
+
+The procedure below is preserved from the original pre-merge review. For a
+post-merge replay of accepted evidence, select GPU-tested implementation
+`506b30dd59702348d6ff11bc7fad435acddf3a76` and fetch the persistent PR reference
+with `git fetch origin refs/pull/16/head` instead of depending on the old feature
+branch. Detach at the selected implementation commit, record it, and continue
+the runtime/input checks below. The final PR HEAD and merge commit are different
+from the GPU-tested implementation. Experiments require that source checkout;
+they are not included in the production Controller wheel.
 
 Use the existing ai-core RTX 4070 12GB TTS environment, local Base checkpoint
 and accepted `voice.pt`. Manually check and free GPU capacity before synthesis.

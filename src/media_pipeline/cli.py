@@ -28,15 +28,22 @@ class _Parser(argparse.ArgumentParser):
 
 def build_parser() -> argparse.ArgumentParser:
     parser = _Parser(
-        prog="media-pipeline",
+        prog="regrain",
         description="Validate or render caller-authored speech; results are UTF-8 JSON.",
         allow_abbrev=False,
     )
+    from . import __version__
+
+    parser.add_argument("--version", action="version", version=f"regrain {__version__}")
     groups = parser.add_subparsers(dest="group", required=True)
     speech = groups.add_parser("speech", allow_abbrev=False, help="speech tools")
     commands = speech.add_subparsers(dest="command", required=True)
     for command in ("validate", "render"):
-        sub = commands.add_parser(command, allow_abbrev=False)
+        sub = commands.add_parser(
+            command, allow_abbrev=False,
+            help=("static script validation (no models)" if command == "validate"
+                  else "render using separate TTS and alignment interpreters"),
+        )
         sub.add_argument("script", help="caller-authored UTF-8 speech JSON")
         sub.add_argument(
             "--max-segment-chars",

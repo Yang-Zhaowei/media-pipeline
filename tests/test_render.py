@@ -2013,56 +2013,68 @@ sys.exit(2)
     assert [e["segment_id"] for e in result["segments"]] == ["a"]
 
 
-# --- C4/C8: isolated interpreter loads the current checkout -----------------
+# --- C4/C8: isolated interpreter loads the Controller package ----------------
 
 
-def test_isolated_interpreter_imports_current_checkout(tmp_path):
-    """The subprocess imports the current checkout via injected PYTHONPATH (C4/C8)."""
+def test_isolated_interpreter_pins_package_without_shadowing_worker_dependencies(
+    tmp_path, monkeypatch
+):
+    """The child gets the pinned Controller package and keeps worker imports isolated."""
 
     import json
     import os
-    import subprocess
+    import shutil
     import sys
-    import tempfile
-    from pathlib import Path
 
-    from media_pipeline.render import _SRC
+    import media_pipeline
+    import media_pipeline.render as render_module
+
+    controller_root = tmp_path / "controller"
+    package_dir = controller_root / "media_pipeline"
+    shutil.copytree(Path(media_pipeline.__file__).resolve().parent, package_dir)
+    (controller_root / "worker_dependency_probe.py").write_text(
+        "VALUE = 'controller-neighbor'\n", encoding="utf-8"
+    )
+    monkeypatch.setattr(render_module, "_PACKAGE_DIR", package_dir)
+
+    worker_root = tmp_path / "worker"
+    worker_root.mkdir()
+    worker_dependency = worker_root / "worker_dependency_probe.py"
+    worker_dependency.write_text("VALUE = 'worker-environment'\n", encoding="utf-8")
+    inherited = os.environ.get("PYTHONPATH", "")
+    monkeypatch.setenv(
+        "PYTHONPATH",
+        str(worker_root) + (os.pathsep + inherited if inherited else ""),
+    )
 
     stage = r"""
 import json
 import sys
 from pathlib import Path
-
-spec = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
 import media_pipeline
-Path(spec["manifest"]).write_text(
-    json.dumps({"media_pipeline_file": media_pipeline.__file__}) + "\n",
-    encoding="utf-8",
-)
-sys.exit(0)
+import worker_dependency_probe
+spec = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
+details = {
+    "package_file": media_pipeline.__file__,
+    "package_version": media_pipeline.__version__,
+    "dependency_file": worker_dependency_probe.__file__,
+    "dependency_value": worker_dependency_probe.VALUE,
+}
+Path(spec["args"][1]["output"]).write_text(json.dumps(details), encoding="utf-8")
+Path(spec["manifest"]).write_text(json.dumps({
+    "runtime_error": None, "segments": [{"segment_id": "probe", "status": "ok"}],
+}) + "\n", encoding="utf-8")
 """
-    with tempfile.TemporaryDirectory() as tmp:
-        task_file = Path(tmp) / "task.json"
-        manifest = Path(tmp) / "results.json"
-        task_file.write_text(
-            json.dumps({"args": [], "manifest": str(manifest)}),
-            encoding="utf-8",
-        )
-        env = dict(os.environ)
-        env["PYTHONPATH"] = str(_SRC) + os.pathsep + env.get("PYTHONPATH", "")
-        # ``-S`` disables ``site`` so the editable venv install is *not*
-        # processed: only the injected ``PYTHONPATH`` can import media_pipeline.
-        subprocess.run(
-            [sys.executable, "-S", "-c", stage, str(task_file)],
-            capture_output=True,
-            text=True,
-            env=env,
-            check=True,
-        )
-        reported = json.loads(manifest.read_text(encoding="utf-8"))["media_pipeline_file"]
-    norm = reported.replace("\\", "/")
-    assert norm.endswith("src/media_pipeline/__init__.py")
-    assert Path(reported).resolve().parent.parent == Path(_SRC).resolve()
+    details_path = tmp_path / "imports.json"
+    result = _run_model_stage(
+        sys.executable, stage, ("model", {"output": str(details_path)})
+    )
+    assert result["runtime_error"] is None
+    details = json.loads(details_path.read_text(encoding="utf-8"))
+    assert Path(details["package_file"]).resolve() == (package_dir / "__init__.py").resolve()
+    assert details["package_version"] == media_pipeline.__version__
+    assert Path(details["dependency_file"]).resolve() == worker_dependency.resolve()
+    assert details["dependency_value"] == "worker-environment"
 
 
 # --- C7: timeline integrity tamper / negative tests -------------------------

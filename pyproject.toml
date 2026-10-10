@@ -1,17 +1,21 @@
 [build-system]
-requires = ["hatchling"]
+requires = ["hatchling==1.27.0"]
 build-backend = "hatchling.build"
 
 [project]
-name = "media-pipeline"
-version = "0.0.0"
-description = "Local-first AI-assisted media processing pipeline"
+name = "regrain"
+version = "0.1.0"
+description = "Small, local-first media processing tools for agents and people"
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = []
 
 [project.scripts]
+regrain = "media_pipeline.cli:main"
 media-pipeline = "media_pipeline.cli:main"
+
+[project.urls]
+Repository = "https://github.com/Yang-Zhaowei/media-pipeline"
 
 [project.optional-dependencies]
 dev = ["pytest>=8"]
@@ -21,6 +25,9 @@ dev = ["pytest>=8"]
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/media_pipeline"]
+
+[tool.hatch.build.targets.wheel.force-include]
+"skills/regrain-speech" = "media_pipeline/skills/regrain-speech"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

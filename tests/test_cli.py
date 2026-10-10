@@ -116,7 +116,19 @@ def test_help_is_human_readable_and_does_not_preflight(argv, capsys, monkeypatch
     assert excinfo.value.code == 0
     captured = capsys.readouterr()
     assert captured.err == ""
-    assert "usage: media-pipeline" in captured.out
+    assert "usage: regrain" in captured.out
+
+
+def test_version_identifies_package_without_preflight(capsys, monkeypatch) -> None:
+    from media_pipeline import __version__
+
+    monkeypatch.setattr(cli, "load_and_validate_script", _no_call)
+    with pytest.raises(SystemExit) as excinfo:
+        cli.main(["--version"])
+    assert excinfo.value.code == 0
+    captured = capsys.readouterr()
+    assert captured.out == f"regrain {__version__}\n"
+    assert captured.err == ""
 
 
 def test_validate_plan_preserves_performance_units_and_directions(tmp_path, capsys, monkeypatch) -> None:
@@ -597,7 +609,8 @@ def test_escaped_surrogate_json_still_produces_valid_utf8_output(tmp_path) -> No
 
 def test_standard_console_entrypoint_and_legacy_module_help() -> None:
     metadata = (_ROOT / "pyproject.toml").read_text(encoding="utf-8")
-    assert '[project.scripts]\nmedia-pipeline = "media_pipeline.cli:main"' in metadata
+    assert 'regrain = "media_pipeline.cli:main"' in metadata
+    assert 'media-pipeline = "media_pipeline.cli:main"' in metadata
     completed = subprocess.run(
         [sys.executable, "-m", "media_pipeline", "--help"],
         env={**_subprocess_env(), "PYTHONIOENCODING": "utf-8"}, capture_output=True, check=False,

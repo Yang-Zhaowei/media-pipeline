@@ -61,6 +61,14 @@ ignored, removed, or emulated. CustomVoice inheritance/clear/override is unchang
 
 ## Render
 
+The lightweight regrain Controller owns validation, subprocess coordination,
+deterministic processing, captions and final publication. TTS and Alignment run
+in their existing independent Python environments. Each child bootstraps the
+Controller package from its resolved package directory, so an installed wheel
+works without a development checkout or `PYTHONPATH`; the Controller's parent
+directory is not added to the worker's import path, which avoids exposing
+unrelated top-level packages to third-party imports.
+
 ```python
 from media_pipeline import render_speech
 
@@ -122,15 +130,23 @@ The renderer does not automatically split, interpret or rewrite the manuscript.
 
 ## Command line
 
-Install the package from a checkout with `python -m pip install -e .` or
-`uv sync`. Use an activated virtual environment, or prefix the commands with
-`uv run` after `uv sync`. The console command is a thin wrapper around
-`load_and_validate_script(...)` and `render_speech(...)`:
+Install the versioned Controller wheel in its own environment, with no source
+checkout or PyPI lookup required. During development, use
+`python -m pip install -e .` or `uv sync`. The primary console command and
+distribution are named `regrain`; `media-pipeline` remains a thin compatibility
+alias. `--version` identifies the installed package version. The console
+command is a thin wrapper around `load_and_validate_script(...)` and
+`render_speech(...)`:
 
 ```console
-media-pipeline speech validate speech.json
-media-pipeline speech render speech.json --output new-run-dir
+regrain --help
+regrain --version
+regrain speech validate speech.json
+regrain speech render speech.json --output new-run-dir
 ```
+
+Both command names use the same parser and behavior. Existing Python APIs,
+`MEDIA_PIPELINE_*` configuration variables and their precedence remain stable.
 
 Both commands accept `--max-segment-chars` (default `200`), the caller's
 preflight budget measured in Unicode code points. It is not a model limit.
